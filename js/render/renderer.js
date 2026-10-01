@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { shared, makeBigFallMaterial } from './materials.js';
 import { Sky } from './sky.js';
+import { Particles } from './particles.js';
 import { LAYERS } from '../world/layers.js';
 import { clamp, lerp, smoothstep } from '../core/mathutil.js';
 
@@ -44,6 +45,8 @@ export class GameRenderer {
     this.buildFalls();
     this.buildShafts();
     this.buildWindmills();
+    this.particles = new Particles(this.scene, plan, settings.particles ?? 1);
+    this.night = 0;
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -247,6 +250,24 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     }
     this.shafts.visible = shaftI > 0.02;
     for (const w of this.windmills.children) w.userData.rotor.rotation.z += dt * w.userData.speed;
+    this.night = st.night;
+    const pxScale = this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
+    this.particles.update(dt, {
+      layer: ctx.layer, zone: ctx.zone, y: ctx.y, enclosed: ctx.enclosed, night: st.night, pos: this.camera.position, pxScale,
+      quality: this.settings.particles ?? 1, wind: 1, light: lerp(1, 0.4, st.night) * lerp(1, 0.6, smoothstep(-300, -900, ctx.y)),
+    });
+  }
+
+  setShadows(on) {
+    this.settings.shadows = on;
+    this.renderer.shadowMap.enabled = on;
+    this.sun.castShadow = on;
+    this.scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) m.needsUpdate = true; } });
+  }
+
+  setPixelRatio(r) {
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, r));
+    this.resize();
   }
 
   render() { this.renderer.render(this.scene, this.camera); }

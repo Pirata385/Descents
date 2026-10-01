@@ -102,6 +102,7 @@ export class ChunkMesher {
     const y = new Float32Array(total * 2);
     const mat = new Uint8Array(total * 2);
     const water = new Float32Array(N * N).fill(NaN);
+    const flow = new Int8Array(N * N * 2);
     const flags = new Uint16Array(N * N);
     let o = 0;
     for (let j = 0; j < N; j++) {
@@ -110,12 +111,12 @@ export class ChunkMesher {
         const k = j * N + i;
         start[k] = o;
         for (let s = 0; s < c.n; s++) { y[o * 2] = c.y0[s]; y[o * 2 + 1] = c.y1[s]; mat[o * 2] = c.top[s]; mat[o * 2 + 1] = c.side[s]; o++; }
-        if (c.nw) water[k] = c.wl[c.nw - 1];
+        if (c.nw) { water[k] = c.wl[c.nw - 1]; flow[k * 2] = c.wfx[c.nw - 1] * 127; flow[k * 2 + 1] = c.wfz[c.nw - 1] * 127; }
         flags[k] = c.flags;
       }
     }
     start[N * N] = o;
-    return { q0, r0, start, y, mat, water, flags };
+    return { q0, r0, start, y, mat, water, flow, flags };
   }
 
   // ---------------------------------------------------------------- colours

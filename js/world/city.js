@@ -161,6 +161,21 @@ export function generateCity(ctx) {
     }
   }
 
+  // --- parapet along the rim edge (openings at gates and observation platforms)
+  {
+    const R = rimAt(0);
+    const steps = Math.ceil((TAU * R) / 2.2);
+    for (let i = 0; i < steps; i++) {
+      const th = -Math.PI + ((i + 0.5) / steps) * TAU;
+      if (nearGate(th, 7 / R)) continue;
+      if (out.platforms.some((pl) => Math.abs(wrapAngle(Math.atan2(field.warpZ(pl.x, pl.z), field.warpX(pl.x, pl.z)) - th)) < (pl.hw + 1.2) / R)) continue;
+      const [x, z] = W(11.6, th);
+      const y = Math.round(groundAt(...W(16, th)) * 2) / 2;
+      const ang = tangentAngle(11.6, th);
+      out.prims.push(box(OP_ADD, x, z, { angle: ang, hw: 1.25, hd: 0.5, y0: y - 3, y1: y + 1.2, top: M.BRICK, side: M.BRICK, maxLod: 1 }));
+    }
+  }
+
   // --- blocks and buildings
   const sortedStreets = streetAngles.slice();
   let guildPlaced = false, marketPlaced = 0, templePlaced = false, observatoryPlaced = false;

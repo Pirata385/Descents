@@ -20,7 +20,7 @@ function init(plan) {
 function transferList(out) {
   const t = [];
   for (const k of ['terrain', 'water', 'falls', 'foliage']) if (out[k]) t.push(...MeshBuffer.prototype.transferables(out[k]));
-  if (out.spans) t.push(out.spans.start.buffer, out.spans.y.buffer, out.spans.mat.buffer, out.spans.water.buffer, out.spans.flags.buffer);
+  if (out.spans) t.push(out.spans.start.buffer, out.spans.y.buffer, out.spans.mat.buffer, out.spans.water.buffer, out.spans.flow.buffer, out.spans.flags.buffer);
   return t;
 }
 

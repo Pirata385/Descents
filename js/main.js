@@ -1,5 +1,7 @@
 // Entry point: boots the user interface and starts games.
 import { Game, DebugCamera } from './game.js';
+import { Player } from './player/player.js';
+import { Grapple } from './player/grapple.js';
 
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('view');
@@ -45,8 +47,18 @@ async function debugStart() {
       let pose;
       if (cam.length >= 3 && cam.every((v) => !Number.isNaN(v))) pose = { x: cam[0], y: cam[1], z: cam[2], yaw: cam[3] || 0, pitch: cam[4] || 0 };
       else pose = namedPose(g, params.get('loc') || 'spawn');
-      g.debugCam = new DebugCamera(g, pose);
-      g.systems.push(g.debugCam);
+      if (params.get('play')) {
+        const pl = new Player(g);
+        pl.spawn(pose.x, pose.y - 1.7, pose.z, pose.yaw);
+        pl.pitch = pose.pitch;
+        g.player = pl;
+        g.grapple = new Grapple(g, pl);
+        pl.grapple = g.grapple;
+        g.systems.push(pl, g.grapple);
+      } else {
+        g.debugCam = new DebugCamera(g, pose);
+        g.systems.push(g.debugCam);
+      }
       g.camera.position.set(pose.x, pose.y, pose.z);
       g.camera.rotation.set(pose.pitch, pose.yaw, 0, 'YXZ');
       if (params.get('time')) g.timeOfDay = Number(params.get('time'));
@@ -63,7 +75,9 @@ async function debugStart() {
   window.__ready = true;
 }
 
-if (location.protocol !== 'file:') {
+if (location.protocol !== 'file:' && params.get('bestiary')) {
+  import('./ui/bestiaryView.js').then((m) => m.bestiary(canvas, params.get('seed') || '12345')).catch((e) => { console.error(e); window.__error = String(e.stack || e); });
+} else if (location.protocol !== 'file:') {
   if (params.get('debug')) debugStart().catch((e) => { console.error(e); window.__error = String(e.stack || e); });
   else import('./ui/app.js').then((m) => m.boot(canvas)).catch((e) => { console.error(e); window.__error = String(e.stack || e); });
 }

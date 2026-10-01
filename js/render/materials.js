@@ -166,7 +166,7 @@ export function makeFoliageMaterial() {
   return m;
 }
 
-const FOG_GLSL = /* glsl */`
+export const FOG_GLSL = /* glsl */`
 uniform vec3 uFogColor;
 uniform float uFogDensity;
 vec3 applyFog(vec3 c, float dist) {

@@ -10,7 +10,7 @@ import { Z_EYE, Z_BOWL, Z_CITY, Z_COUNTRY, Z_SEA } from './field.js';
 import { M, MATERIALS } from './materials.js';
 
 class Col {
-  constructor() { this.n = 0; this.y = null; this.mat = null; this.water = NaN; this.flags = 0; this.off = 0; }
+  constructor() { this.n = 0; this.y = null; this.mat = null; this.water = NaN; this.flags = 0; this.off = 0; this.flowX = 0; this.flowZ = 0; }
 }
 
 export class World {
@@ -55,6 +55,7 @@ export class World {
         v.off = ch.start[k];
         v.y = ch.y; v.mat = ch.mat;
         v.water = ch.water[k];
+        v.flowX = ch.flow[k * 2] / 127; v.flowZ = ch.flow[k * 2 + 1] / 127;
         v.flags = ch.flags[k];
         ch.views[k] = v;
       }
@@ -74,6 +75,7 @@ export class World {
     v.mat = new Uint8Array(c.n * 2);
     for (let s = 0; s < c.n; s++) { v.y[s * 2] = c.y0[s]; v.y[s * 2 + 1] = c.y1[s]; v.mat[s * 2] = c.top[s]; v.mat[s * 2 + 1] = c.side[s]; }
     v.water = c.nw ? c.wl[c.nw - 1] : NaN;
+    if (c.nw) { v.flowX = c.wfx[c.nw - 1]; v.flowZ = c.wfz[c.nw - 1]; }
     v.flags = c.flags;
     this.cache.set(key, v);
     return v;

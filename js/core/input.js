@@ -40,6 +40,8 @@ export class Input {
     this.onUnlock = null;
     window.addEventListener('keydown', (e) => {
       if (!this.enabled) return;
+      const typing = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT');
+      if (typing) return;
       if (e.code === 'Tab') e.preventDefault();
       if (!this.down.has(e.code)) this.pressed.add(e.code);
       this.down.add(e.code);
