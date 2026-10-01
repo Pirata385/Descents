@@ -22,7 +22,7 @@ export const LAYERS = [
     yBottom: -40,
     implemented: true,
     visuals: {
-      fogColor: [0.66, 0.78, 0.9], fogDensity: 0.0011,
+      fogColor: [0.7, 0.8, 0.9], fogDensity: 0.00075,
       skyTint: [1, 1, 1], ambient: [0.62, 0.68, 0.78], sun: [1.0, 0.95, 0.86],
       particles: 'dust',
     },
@@ -45,7 +45,7 @@ export const LAYERS = [
     yBottom: -350,
     implemented: true,
     visuals: {
-      fogColor: [0.62, 0.74, 0.8], fogDensity: 0.0016,
+      fogColor: [0.66, 0.76, 0.84], fogDensity: 0.0011,
       skyTint: [1, 1, 1], ambient: [0.58, 0.66, 0.7], sun: [1.0, 0.94, 0.82],
       particles: 'pollen',
     },
@@ -69,7 +69,7 @@ export const LAYERS = [
     yBottom: -900,
     implemented: true,
     visuals: {
-      fogColor: [0.24, 0.36, 0.34], fogDensity: 0.0032,
+      fogColor: [0.2, 0.32, 0.31], fogDensity: 0.0024,
       skyTint: [0.7, 0.85, 0.8], ambient: [0.36, 0.5, 0.48], sun: [0.72, 0.86, 0.78],
       particles: 'spores',
     },
