@@ -276,6 +276,7 @@ Browser checks use Playwright and a running server
 npm run test:ui        # menus, HUD, journal tabs, pause, saving (screenshots in tests/output)
 npm run test:play      # observe a creature, take an artifact, visit every layer
 npm run test:traverse  # an autopilot walks every guaranteed route, city → Layer 3, with real physics
+npm run test:grapple   # climb a rim cliff using only the grappling arm
 ```
 
 Set `BASE_URL` if the server runs elsewhere.

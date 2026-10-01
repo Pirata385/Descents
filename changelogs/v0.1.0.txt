@@ -101,4 +101,5 @@ TESTS
   save round trips, performance budgets.
 - Browser tests with Playwright for the interface, a gameplay scenario and a
   traversal test in which an autopilot walks every guaranteed route from the
-  city to the Threshold using the real player physics.
+  city to the Threshold using the real player physics, and a grappling test
+  that climbs a rim cliff with the arm alone.

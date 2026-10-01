@@ -9,7 +9,8 @@
     "test": "node tests/run-all.js",
     "test:ui": "node tools/ui-test.mjs tests/output",
     "test:play": "node tools/scenario-test.mjs tests/output",
-    "test:traverse": "node tools/traverse-test.mjs"
+    "test:traverse": "node tools/traverse-test.mjs",
+    "test:grapple": "node tools/grapple-test.mjs"
   },
   "license": "MIT"
 }
