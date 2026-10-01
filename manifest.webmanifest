@@ -1,0 +1,14 @@
+{
+  "name": "Descents",
+  "short_name": "Descents",
+  "description": "A procedural first-person exploration game about descending into a vast abyss.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b0f14",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

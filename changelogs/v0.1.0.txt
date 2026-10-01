@@ -1,0 +1,105 @@
+DESCENTS — version 0.1.0
+Date: 2026-10-01
+First playable version.
+
+SCOPE
+- The city around the Abyss, Layer 1 (The Verdant Edge), Layer 2 (The Inverted
+  Forest, including the Stone Plain) and the entrance of Layer 3 (The Great
+  Fault, down to the Threshold).
+- One continuous world: no loading screens between layers, no teleporting.
+
+WORLD GENERATION
+- Everything is generated from a seed with seeded random streams; the same seed
+  always rebuilds the same world.
+- Hexagonal terrain columns over an island of about 3 km x 2.6 km, evaluated as
+  stacks of solid spans so caves, overhangs, arches, galleries and cliffs are real
+  geometry.
+- Terrain field built from simplex fBm, ridged noise, domain warping and angular
+  noise tables: rim plateau, city terraces and vales, the Layer 1 bowl with
+  terraces, ravines, outcrops and spires, the Abyss Eye, gallery chambers in the
+  shaft wall, the bell chamber over the Stone Plain and the Great Fault.
+- Hydrology on a coarse grid: priority-flood lakes with one level per connected
+  body, flow accumulation, rivers that follow the terrain downhill with falls,
+  great waterfalls where rivers reach the Eye, springs and plunge pools in Layer 2.
+- Caves (branching systems and through-caves), the Great Spiral ledge, gallery
+  windows, deep tunnels between layers, the Long Stair, the fault ledge.
+- Procedural city: radial avenues and ring streets, districts, houses, towers,
+  markets with stalls and fountains, the Delvers' Guild, temple, observatory,
+  windmills, hamlets and fields, gates with stairways, rim walls, observation
+  platforms with cranes and telescopes.
+- Ruins, arches, monoliths and crystal geodes placed by context.
+- Route planner (A* on the coarse grid, smoothing, height profiles, multi-level
+  stamping, bridges and decks) with walkability validation of every journey.
+
+RENDERING
+- Quadtree chunk streaming with six levels of detail, meshed in web workers.
+- Terrain shader with baked exposure and ambient occlusion, depth-dependent abyss
+  light, strata, hex edges, glowing crystals, fungus, lava veins and lit windows.
+- Vegetation: grasses, meadows, flowers, shrubs, trees, conifers, ferns, reeds,
+  crops, mushrooms, hanging vines, inverted trees, pale plain trees; wind sway.
+- Water surfaces, river flow, waterfalls, sky with clouds, sun, moon and stars,
+  ocean, day/night cycle, per-layer fog and light, light shafts into the Eye,
+  shadows, atmospheric particles and waterfall mist.
+
+EXPLORER
+- First-person walking, running, crouching, jumping, step-up, mantling, climbing
+  with stamina, swimming with river currents, fall damage, respawn at the last
+  safe position.
+- The Mechanical Grappling Arm: 60 m claw, physical cable constraint (swing,
+  reel in, pay out, pull-up over ledges), cable snagging on edges.
+
+CREATURES
+- About 30 species per world in five families (mammals, reptilians, birds,
+  arthropods, lithoseres) generated from ecological roles and genomes
+  (morphology, colours, patterns, behaviour, diet, senses, social life,
+  reproduction, activity period, voice).
+- Skinned procedural meshes with per-individual colours and proportions, and
+  procedural animation for walking, running, hopping, slithering, rolling,
+  flying, gliding, ceiling crawling, grazing, calling and resting.
+- Ecosystem: abstract population dynamics per region plus individual agents near
+  the explorer that forage, drink, hunt, flee, defend territory, court, give
+  birth, raise young, flock, live in symbiosis, scavenge, sleep and migrate.
+- Creatures of Layers 1 and 2 ignore the explorer; the predator of the Great
+  Fault stalks and attacks, and retreats from a bright lamp.
+
+ARTIFACTS
+- About 55 artifacts per world with procedural shapes, materials, rarity grades,
+  categories, effects, abilities and drawbacks, placed in ruins, cave chambers,
+  on spires, in crystal geodes, by waterfalls and at the Threshold.
+- Pick up, three equipment slots, gradual identification, abilities (flare,
+  updraft, echo pulse, glide, survey) and the explorer's lamp.
+
+DISCOVERY, CATALOGS AND MAPS
+- Creature catalog: recorded on sight, facts unlocked by observing (hold F),
+  witnessed interactions recorded, 3D turntable preview.
+- Artifact catalog with appearance, category, rarity, known properties and
+  discovery location.
+- Explorer's map of explored terrain only (three depth bands, hillshade,
+  contours, landmarks, routes walked, artifact sites, trail, layer boundaries).
+- Vertical abyss map: all layers by depth, deepest point, places, known routes
+  and a true terrain cross-section along the explorer's bearing.
+- Landmark, route and layer discovery with notifications and layer banners.
+
+AUDIO
+- Procedural Web Audio: wind, water, rivers, waterfalls, cave air and reverb,
+  drips, the city, unseen birds and insects, footsteps per material, grappling
+  arm sounds, creature calls synthesised from each species' genome, interface
+  sounds and generative music per layer.
+
+INTERFACE AND SAVES
+- Title screen with seed entry, loading screen, pause menu, settings (view
+  distance, resolution, particles, shadows, field of view, mouse, volumes),
+  controls screen, HUD with compass, depth, health, stamina, prompts and
+  notifications.
+- Saves in browser storage (manual, autosave every two minutes and on reaching a
+  new layer), load list, export/import as JSON files.
+
+TESTS
+- npm test: determinism, seed variety, city, layer structure, route validation
+  and connectivity, water rules, caves and cliffs, species variety, food webs,
+  inheritance, headless ecosystem simulation, artifact placement and effects,
+  save round trips, performance budgets.
+- Browser tests with Playwright for the interface, a gameplay scenario and a
+  traversal test in which an autopilot walks every guaranteed route from the
+  city to the Threshold using the real player physics, and a grappling test
+  that climbs a rim cliff with the arm alone.

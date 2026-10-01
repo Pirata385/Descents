@@ -1,0 +1,46 @@
+DESCENTS — version 0.2.0
+Date: 2026-10-01
+Mobile support (phones and tablets, landscape).
+
+TOUCH CONTROLS
+- Floating movement stick under the left thumb (appears where you touch;
+  analog walking speed, push fully to run); drag anywhere on the right to look.
+- Action buttons under the right thumb: Jump, grappling Arm (Release while
+  attached), Crouch, Observe (hold), Lamp.
+- Buttons that appear only when useful: Take (next to an artifact), Reel in and
+  Pay out (while the claw is attached), Ability (with its recharge time).
+- Labels follow the situation (Leap / Drop while climbing, Let go while
+  hanging on the cable).
+- Pause, map and journal buttons along the top; pinch to zoom the map.
+- Multi-touch: move, look and press buttons at the same time.
+- Touch settings: on/off/automatic, look speed, button size and opacity;
+  tablets get slightly larger buttons automatically.
+
+LANDSCAPE AND MOBILE BROWSERS
+- Touch devices are detected automatically.
+- Starting a game goes full screen and locks landscape where supported.
+- Holding the device upright shows a "turn your device sideways" prompt and
+  pauses the game; rotating back returns to the pause menu.
+- Web app manifest: adding the game to the home screen opens it full screen
+  in landscape. Viewport and safe-area handling for notched phones; browser
+  zoom and scroll gestures are disabled during play.
+- First launch on a mobile device uses lighter graphics settings (view
+  distance 60%, no shadows, half particles, no antialiasing, resolution 1x).
+
+LAYOUT
+- HUD rearranged around the thumbs on touch screens (depth, clock and worn
+  artifacts top left, map/journal top right, two latest notifications).
+- Compact title screen, menus, settings and journal for short landscape
+  screens; the journal fills the screen; panels keep their Done/Back buttons
+  in reach while their contents scroll.
+- Prompts, hints, the controls screen and journal texts name the touch
+  buttons instead of keys.
+- The grappling arm model is drawn smaller and lower on touch screens.
+
+TESTS
+- tools/mobile-test.mjs (npm run test:mobile): an emulated phone plays in
+  landscape with real multi-touch input — rotate prompt, mobile defaults,
+  joystick, look, two fingers at once, jump, grappling arm and reeling,
+  observe, map pinch-zoom, journal, pause, settings, turning the phone while
+  playing — and checks that no control overlaps another or the HUD on a
+  phone, a small phone and a tablet.
