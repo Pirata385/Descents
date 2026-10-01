@@ -492,7 +492,8 @@ export class ColumnGen {
               col.addWater(L, 0, 0, 0);
               col.flags |= CF.LAKE;
             }
-          } else {
+          } else if (!(col.flags & CF.RIVER)) {
+            // shore bank (but never across a river channel entering or leaving the lake)
             const need = Math.ceil((L + 0.32) * 2) / 2;
             if (top < need) col.add(top, need, M.SAND, M.DIRT, M.DIRT);
             else if (top < L + 1.2) col.top[col.n - 1] = M.SAND;
@@ -721,8 +722,8 @@ export class ColumnGen {
       const below = fi >= 0 ? col.y1[fi] : -Infinity;
       let overRoute = false;
       for (let k = 0; k < si2; k++) if (Math.abs(sel[k].y - below) < 0.6 || (below < sel[k].y + sel[k].rt.clear && below >= sel[k].y - 0.6)) overRoute = true;
-      // never fill down into a cave: bridge over it instead
-      if ((col.flags & CF.CAVE) && y - below > 0.6) overRoute = true;
+      // never fill down into a cave: bridge over it when there is room beneath
+      if ((col.flags & CF.CAVE) && y - below > 2.8) overRoute = true;
       let wet = overRoute;
       for (let k = 0; k < col.nw; k++) if (col.wl[k] > below - 0.1 && col.wl[k] < y + 0.5) wet = true;
       const topMat = rt.stairMat && c.slope > 0.3 ? rt.stairMat : rt.mat;

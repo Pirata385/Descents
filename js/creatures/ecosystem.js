@@ -260,8 +260,12 @@ export class Ecosystem {
         else if (d < DROP_R) { const r = this.regions.get(key); if (r && r.active) want.add(key); }
       }
     }
-    // deactivate regions no longer wanted
+    // deactivate regions no longer wanted, and free their agents right away
     for (const r of this.regions.values()) if (r.active && !want.has(r.key)) this.deactivate(r);
+    if (this.agents.some((a) => a.dead)) {
+      for (const a of this.agents) if (a.dead) this.disposeAgent(a);
+      this.agents = this.agents.filter((a) => !a.dead);
+    }
     // activate new ones (nearest first)
     const list = [...want].map((k) => { const [b, i, j] = k.split(':').map(Number); return { b, i, j, d: Math.hypot((i + 0.5) * RS - ppos.x, (j + 0.5) * RS - ppos.z) }; }).sort((a, b) => a.d - b.d);
     for (const it of list) {
@@ -279,6 +283,8 @@ export class Ecosystem {
     for (let si = 0; si < this.sp.length; si++) {
       const S = this.sp[si];
       let count = Math.round(r.pops[si] + rng.range(-0.3, 0.3));
+      // the lone hunters of the Fault: one per suitable region
+      if (S.s.behavior.playerAware) count = r.pops[si] > 0.15 ? 1 : 0;
       if (count <= 0) continue;
       const room = MAX_AGENTS - this.agents.length;
       count = Math.min(count, room, 14);
@@ -398,6 +404,8 @@ export class Ecosystem {
       }
     }
     if (a.state === 'flee' && a.timer > 0) return;
+    // ongoing courtship displays and feeding are not interrupted by routine decisions
+    if ((a.state === 'court' || a.state === 'eat') && a.timer > 0) return;
     // offspring follow a parent
     if (a.juvenile && a.parent && !a.parent.dead && beh.reproduction.care !== 'none') {
       a.state = 'follow'; a.target = a.parent;
@@ -450,10 +458,10 @@ export class Ecosystem {
       }
     }
     // 4. territory
-    if (beh.territoriality > 0.5 && !a.juvenile) {
+    if (beh.territoriality > 0.5 && !a.juvenile && t - (a.lastTerritory || -99) > 20) {
       const rival = this.nearest(a, (b) => (b.sp === sp && b.groupId !== a.groupId && !b.juvenile) || rel.competitors.includes(b.sp.id), 14 + beh.territoriality * 16);
       if (rival && a.state !== 'chase') {
-        a.state = 'chase'; a.target = rival; a.timer = 5;
+        a.state = 'chase'; a.target = rival; a.timer = 5; a.lastTerritory = t;
         if (rival.state !== 'flee') { rival.state = 'flee'; rival.target = a; rival.timer = 4; }
         this.emit('territorial', { a, b: rival });
         this.call(a, 'threat');
@@ -465,7 +473,7 @@ export class Ecosystem {
     if (rel.symbiontOf !== null && rel.symbiontOf !== undefined) {
       const host = this.nearest(a, (b) => b.sp.id === rel.symbiontOf, 60);
       if (host) {
-        if (a.state !== 'symbiosis') this.emit('symbiosis', { a, host });
+        if (a.state !== 'symbiosis' && t - (a.lastSym || -99) > 60) { a.lastSym = t; this.emit('symbiosis', { a, host }); }
         a.state = 'symbiosis'; a.target = host; a.timer = 8;
         a.energy = Math.min(1, a.energy + 0.02);
         return;
@@ -510,7 +518,7 @@ export class Ecosystem {
     const inFault = p.pos.y < -880;
     const lamp = this.game.lamp && this.game.lamp.on && this.game.lamp.power > 0.6;
     if (a.state === 'retreat' && a.timer > 0) return;
-    if (!inFault || d > 90 || p.mode === 'dead') { if (a.state !== 'wander') { a.state = 'wander'; a.timer = 4; } return; }
+    if (!inFault || d > 160 || p.mode === 'dead') { if (a.state !== 'wander') { a.state = 'wander'; a.timer = 4; } return; }
     if (lamp && d < 14 && a.state !== 'retreat') {
       a.state = 'retreat'; a.timer = 12; a.target = null; this.emit('flee', { a, from: { sp: { id: -1 }, pos: p.pos } }); this.call(a, 'alarm');
       return;
@@ -678,7 +686,11 @@ export class Ecosystem {
         speed = beh.speed.walk;
         a.timer -= dt;
         if (a.timer <= 0) {
-          if (a.sex === 'f' && a.pos.distanceTo(tpos) < 8 + a.scale * 2) this.birth(a, tgt);
+          const female = a.sex === 'f' ? a : tgt.sex === 'f' ? tgt : null;
+          const male = female === a ? tgt : a;
+          if (female && !female.dead && female.repro <= 0 && female.pos.distanceTo(male.pos) < 8 + a.scale * 2) this.birth(female, male);
+          // a failed or finished courtship is not repeated straight away
+          for (const x of [a, tgt]) if (x.repro <= 0) x.repro = 30 + Math.random() * 40;
           a.state = 'idle'; a.timer = 4;
           if (tgt.state === 'court') { tgt.state = 'idle'; tgt.timer = 4; }
         }

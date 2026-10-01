@@ -426,8 +426,16 @@ export class App {
     gr.on('release', () => A.play('grapple-release'));
     gr.on('stowed', () => A.play('grapple-stow'));
     gr.on('pullup', () => A.play('pullup'));
+    // creature voices: nearby and urgent calls first, never a cacophony
+    let lastCall = 0;
     g.ecosystem.on((type, d) => {
-      if (type === 'call' && d.a && d.a.pos.distanceTo(p.pos) < 140) A.creatureCall(d.a.sp, d.a.pos, d.kind, d.a.juvenile ? 0.45 : 1);
+      if (type !== 'call' || !d.a) return;
+      const dist = d.a.pos.distanceTo(p.pos);
+      const urgent = d.kind === 'alarm' || d.kind === 'threat' || d.kind === 'hunt';
+      const now = g.gameTime;
+      if (dist > (urgent ? 140 : 70) || now - lastCall < (urgent ? 0.15 : 0.6)) return;
+      lastCall = now;
+      A.creatureCall(d.a.sp, d.a.pos, d.kind, d.a.juvenile ? 0.45 : 1);
     });
     const D = g.discovery;
     D.on((type, d) => {

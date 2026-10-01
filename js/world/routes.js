@@ -227,8 +227,13 @@ export function validatePath(gen, samples, opts = {}) {
   for (let i = 0; i < samples.length; i++) {
     const [x, y, z] = samples[i];
     gen.column(x, z, 0, col);
-    const f = col.floorBelow(y + tol);
+    let f = col.floorBelow(y + tol);
+    // a surface a little above the path (a deck or step it runs onto) is walkable too
+    const fUp = col.floorBelow(y + tol + 0.7);
+    if (fUp > f && (fUp + 1 < col.n ? col.y0[fUp + 1] : Infinity) - col.y1[fUp] >= headroom) f = fUp;
     if (f < 0) { failures.push({ i, x, y, z, why: 'no floor' }); prevFloor = null; continue; }
+    // spans that touch form one solid stack: its top is the real floor (a step)
+    while (f + 1 < col.n && col.y0[f + 1] - col.y1[f] < 0.05 && col.y1[f + 1] - y < maxStep + tol) f++;
     const fy = col.y1[f];
     if (fy < y - (opts.drop ?? 2.2)) { failures.push({ i, x, y, z, fy, why: 'floor too low' }); prevFloor = null; continue; }
     const ceil = f + 1 < col.n ? col.y0[f + 1] : Infinity;

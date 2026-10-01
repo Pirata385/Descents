@@ -38,6 +38,7 @@ export class Input {
     this.invertY = false;
     this.enabled = true;
     this.onUnlock = null;
+    this.lockTime = 0;
     window.addEventListener('keydown', (e) => {
       if (!this.enabled) return;
       const typing = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT');
@@ -56,14 +57,18 @@ export class Input {
     window.addEventListener('mouseup', (e) => { this.buttons &= ~(1 << e.button); });
     window.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
-      this.mouseDX += e.movementX || 0;
-      this.mouseDY += e.movementY || 0;
+      // browsers can report one bogus jump right after the pointer locks
+      const dx = e.movementX || 0, dy = e.movementY || 0;
+      if (performance.now() - this.lockTime < 120 || Math.abs(dx) > 350 || Math.abs(dy) > 350) return;
+      this.mouseDX += dx;
+      this.mouseDY += dy;
     });
     window.addEventListener('wheel', (e) => { if (this.locked) this.wheel += Math.sign(e.deltaY); }, { passive: true });
     element.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('pointerlockchange', () => {
       const was = this.locked;
       this.locked = document.pointerLockElement === element;
+      if (this.locked) this.lockTime = performance.now();
       if (was && !this.locked && this.onUnlock) this.onUnlock();
     });
   }

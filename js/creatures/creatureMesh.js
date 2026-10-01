@@ -96,6 +96,7 @@ class Builder {
 const MASK_BASE = [0, 0, 0];
 const MASK_ACCENT = [0, 0, 1];
 const MASK_DARK = [1, 0, 0];
+const MASK_EYE = [2, 0, 0];   // r > 1.5 marks eyes (dark, or glowing accent)
 
 /**
  * Build the species template: { geometry, bones: [{name, parent, pos}], rig }
@@ -155,8 +156,16 @@ export function buildSpeciesModel(sp) {
     } else if (!arth) {
       gx *= 0.85 + 0.3 * Math.sin(Math.PI * t); gy *= 0.85 + 0.3 * Math.sin(Math.PI * t);
       if (m.legs.biped && fam === 'bird') { gx *= 1.1; gy *= 1.15; }
+      if (fam === 'mammal') { const chestK = 0.92 + 0.22 * t; gx *= chestK; gy *= chestK; }
     }
     b.ellipsoid(bp, V3(gx * 0.55, gy * 0.55, segLen * (arth ? 0.62 : 0.85)), spine[i], null, 10, 7, null, patFn);
+  }
+  // shaggy fur: a ruff over the shoulders and a mane along the back
+  if (fam === 'mammal' && m.shag > 0.45) {
+    const sb = spine[nSpine - 1];
+    const bp = bones[sb].pos;
+    const k = 0.5 + m.shag * 0.5;
+    b.ellipsoid(V3(bp.x, bp.y + height * 0.12, bp.z + segLen * 0.1), V3(girth * 0.62 * k + 0.02, (height * 0.5 + girth * 0.5) * 0.6 * k, segLen * 0.55), sb, [0.65, 0, 0], 9, 6);
   }
   // lithosere plates / shell
   if (lith) {
@@ -199,7 +208,7 @@ export function buildSpeciesModel(sp) {
   let neckTip = V3(chest.x, chest.y + height * 0.15, chest.z + segLen * 0.5);
   prev = spine[nSpine - 1];
   const neckBones = [];
-  const neckUp = fam === 'bird' ? 0.85 : m.neckLen > 0.6 ? 0.7 : 0.35;
+  const neckUp = fam === 'bird' ? 0.85 : m.neckLen > 0.6 ? 0.7 : fam === 'mammal' ? 0.6 : 0.35;
   for (let i = 0; i < nNeck; i++) {
     const seg = (m.neckLen / nNeck);
     const p = V3(neckTip.x, neckTip.y + seg * neckUp, neckTip.z + seg * (1 - neckUp * 0.5));
@@ -243,9 +252,9 @@ export function buildSpeciesModel(sp) {
     const ex = center ? 0 : sgn * hs * (0.32 - row * 0.05);
     const ey = hc.y + hs * (0.16 + row * 0.12) + (center ? hs * 0.12 : 0);
     const ez = hc.z + hs * (0.32 - row * 0.12);
-    const er = hs * m.eyes.size * 2.2 * (center ? 1.2 : 1);
+    const er = hs * m.eyes.size * (fam === 'bird' ? 1.5 : arth ? 1.6 : 1.25) * (center ? 1.2 : 1);
     if (m.eyes.stalk) b.tube(V3(ex, ey, ez), V3(ex * 1.2, ey + hs * 0.3, ez), er * 0.4, er * 0.3, head, MASK_DARK, 4);
-    b.ellipsoid(V3(ex, ey + (m.eyes.stalk ? hs * 0.3 : 0), ez), V3(er, er, er), head, MASK_ACCENT, 6, 4);
+    b.ellipsoid(V3(ex, ey + (m.eyes.stalk ? hs * 0.3 : 0), ez), V3(er, er, er), head, MASK_EYE, 6, 4);
   }
   // ears
   if (m.ears.size > 0.02) {
@@ -336,7 +345,7 @@ export function buildSpeciesModel(sp) {
       const pts = m.tail.tip === 'fork'
         ? [p.clone(), V3(p.x - w, p.y, p.z - l), V3(p.x, p.y, p.z - l * 0.5), V3(p.x + w, p.y, p.z - l)]
         : [p.clone(), V3(p.x - w, p.y + l * 0.1, p.z - l), V3(p.x, p.y + l * 0.15, p.z - l * 1.15), V3(p.x + w, p.y + l * 0.1, p.z - l)];
-      b.fan(pts, V3(0, 1, 0), tipB, MASK_DARK);
+      b.fan(pts, V3(0, 1, 0), tipB, [0.5, 0, 0]);
     }
   }
 
@@ -396,15 +405,15 @@ export function buildSpeciesModel(sp) {
       const mid = V3(base.x + sgn * span * 0.5, base.y + span * 0.05, base.z - span * 0.05);
       const wo = addBone('wing' + (sgn > 0 ? 'R' : 'L') + 'o', wi, mid);
       const tip = V3(base.x + sgn * span, base.y, base.z - span * 0.25);
-      const mask = m.wings.type === 'insect' ? [0.2, 0.5, 0.3] : MASK_DARK;
+      const mask = m.wings.type === 'insect' ? [0.1, 0.75, 0.12] : [0.25, 0, 0];
       if (m.wings.type === 'feather') {
-        const chord = span * 0.45;
-        b.fan([base.clone(), mid.clone(), V3(mid.x, mid.y, mid.z - chord), V3(base.x, base.y, base.z - chord * 0.8)], V3(0, 1, 0), wi, mask);
-        b.fan([mid.clone(), tip.clone(), V3(tip.x - sgn * span * 0.1, tip.y, tip.z - chord * 0.6), V3(mid.x, mid.y, mid.z - chord)], V3(0, 1, 0), wo, mask);
+        const chord = span * 0.34;
+        b.fan([base.clone(), mid.clone(), V3(mid.x, mid.y, mid.z - chord), V3(base.x, base.y, base.z - chord * 0.85)], V3(0, 1, 0), wi, [0.15, 0.1, 0]);
+        b.fan([mid.clone(), tip.clone(), V3(tip.x - sgn * span * 0.12, tip.y, tip.z - chord * 0.55), V3(mid.x, mid.y, mid.z - chord)], V3(0, 1, 0), wo, [0.55, 0, 0]);
       } else if (m.wings.type === 'membrane') {
         b.tube(base, mid, girth * 0.05, girth * 0.04, wi, MASK_DARK, 4);
         b.tube(mid, tip, girth * 0.04, girth * 0.02, wo, MASK_DARK, 4);
-        b.fan([base.clone(), mid.clone(), tip.clone(), V3(tip.x - sgn * span * 0.25, base.y - span * 0.02, base.z - span * 0.55), V3(base.x, base.y - span * 0.05, base.z - L * 0.35)], V3(0, 1, 0), wi, [0.5, 0.2, 0], [wi, wo, wo, wo, wi]);
+        b.fan([base.clone(), mid.clone(), tip.clone(), V3(tip.x - sgn * span * 0.25, base.y - span * 0.02, base.z - span * 0.45), V3(base.x, base.y - span * 0.05, base.z - L * 0.3)], V3(0, 1, 0), wi, [0.45, 0.35, 0], [wi, wo, wo, wo, wi]);
       } else {
         const ch = span * 0.5;
         b.fan([base.clone(), V3(base.x + sgn * span * 0.4, base.y, base.z + ch * 0.4), tip.clone(), V3(base.x + sgn * span * 0.6, base.y, base.z - ch * 0.7)], V3(0, 1, 0), wo, mask);
@@ -450,11 +459,13 @@ uniform vec3 uPrimary; uniform vec3 uSecondary; uniform vec3 uBelly; uniform vec
   vec3 cc = mix(uPrimary, uSecondary, clamp(vColor.r, 0.0, 1.0));
   cc = mix(cc, uBelly, clamp(vColor.g, 0.0, 1.0));
   cc = mix(cc, uAccent, clamp(vColor.b, 0.0, 1.0));
+  float eyeM = step(1.5, vColor.r);
+  cc = mix(cc, mix(vec3(0.025, 0.02, 0.02), uAccent * 0.7, step(0.3, uGlow)), eyeM);
   diffuseColor.rgb *= cc;
 #endif`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 #ifdef USE_COLOR
-  totalEmissiveRadiance += uAccent * clamp(vColor.b, 0.0, 1.0) * uGlow * 1.6;
+  totalEmissiveRadiance += uAccent * (clamp(vColor.b, 0.0, 1.0) * 0.5 + step(1.5, vColor.r)) * uGlow * 1.6;
 #endif`);
   };
   m.customProgramCacheKey = () => 'creature';

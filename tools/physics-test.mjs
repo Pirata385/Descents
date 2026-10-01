@@ -1,13 +1,14 @@
 // Deterministic physics test: steps the player at 60 Hz inside the page with scripted input.
 import { createRequire } from 'node:module';
-const require = createRequire('/opt/node22/lib/node_modules/');
-const { chromium } = require('playwright');
+let chromium;
+try { ({ chromium } = await import('playwright')); } catch { ({ chromium } = createRequire('/opt/node22/lib/node_modules/')('playwright')); }
+const BASE = process.env.BASE_URL || 'http://localhost:8099';
 const seed = process.argv[2] || '12345';
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: 320, height: 200 } });
 const logs = [];
 page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
-await page.goto(`http://localhost:8099/index.html?debug=1&play=1&seed=${seed}&shadows=0&vd=0.5`);
+await page.goto(`${BASE}/index.html?debug=1&play=1&seed=${seed}&shadows=0&vd=0.5`);
 await page.waitForFunction(() => window.__ready || window.__error, null, { timeout: 240000 });
 const res = await page.evaluate(() => {
   const g = window.__descents;

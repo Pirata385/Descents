@@ -15,6 +15,22 @@ const ICONS = {
   ruin: '♜', arch: '∩', spire: '▲', station: '⚑', gallery: '♣', plain: '◇', stair: '≡', fault: '✕', threshold: '∏', cave: '●', crystal: '✦',
 };
 
+/** Draw a label unless it would overlap one already placed (nudges it first). */
+function placeLabel(ctx, text, x, y, placed, align = 'left', stroke = null) {
+  const w = ctx.measureText(text).width, h = 12;
+  const x0 = align === 'center' ? x - w / 2 : x;
+  for (let k = 0; k < 4; k++) {
+    const yy = y + k * 13;
+    const hit = placed.some((r) => x0 < r[0] + r[2] && x0 + w > r[0] && yy - h < r[1] && yy > r[1] - r[3]);
+    if (hit) continue;
+    placed.push([x0, yy, w, h]);
+    if (stroke) { ctx.lineWidth = 3; ctx.strokeStyle = stroke; ctx.strokeText(text, x, yy); }
+    ctx.fillText(text, x, yy);
+    return true;
+  }
+  return false;
+}
+
 function mapColor(mat, flags) {
   if (flags & F_VOID) return [0.06, 0.08, 0.1];
   if (flags & F_WATER) return [0.34, 0.52, 0.62];
@@ -290,6 +306,7 @@ export class TopDownMap {
 
   drawLandmarks(ctx) {
     const plan = this.game.plan;
+    const placed = [];
     ctx.save();
     ctx.textAlign = 'center';
     for (const lm of plan.landmarks) {
@@ -302,9 +319,7 @@ export class TopDownMap {
       ctx.fillText(ICONS[lm.type] || '•', x, y + 5);
       if (this.zoom > 0.35 || ['eye', 'station', 'guild', 'threshold', 'gallery', 'plain'].includes(lm.type)) {
         ctx.font = 'italic 12px Georgia, serif';
-        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(230,220,190,0.8)';
-        ctx.strokeText(lm.name, x, y - 9);
-        ctx.fillText(lm.name, x, y - 9);
+        placeLabel(ctx, lm.name, x, y - 9, placed, 'center', 'rgba(230,220,190,0.8)');
       }
     }
     ctx.restore();
@@ -564,6 +579,7 @@ export class VerticalMap {
     }
     // landmarks near this bearing
     ctx.font = '11px Georgia, serif';
+    const placed = [];
     const f = g.world.field;
     for (const lm of g.plan.landmarks) {
       if (!this.disc.landmarks.has(lm.id) || lm.minor) continue;
@@ -573,7 +589,7 @@ export class VerticalMap {
       const X = sx(lm.type === 'eye' ? 0 : Q.r), Y = sy(lm.y);
       ctx.fillStyle = '#ffe2a0';
       ctx.fillRect(X - 2, Y - 2, 4, 4);
-      ctx.fillText(lm.name, X + 5, Y - 4);
+      placeLabel(ctx, lm.name, X + 5, Y - 4, placed);
     }
     // the explorer's trail projected on the section
     const t = g.mapData.trail;

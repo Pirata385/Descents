@@ -75,26 +75,28 @@ function morphology(rng, family, role, size) {
     case 'mammal': {
       m.covering = 'fur';
       m.shag = rng.range(0, 1);
-      m.bodyGirth = rng.range(0.22, 0.42);
-      m.bodyHeight = m.bodyGirth * rng.range(0.9, 1.2);
-      m.neckLen = rng.range(0.1, carn ? 0.25 : 0.55);
+      m.bodyLen = rng.range(0.72, 0.95);
+      m.bodyGirth = rng.range(0.3, 0.46);
+      m.bodyHeight = m.bodyGirth * rng.range(1.0, 1.3);
+      m.neckLen = rng.range(0.12, carn ? 0.3 : 0.5);
+      m.neckThick = rng.range(0.6, 0.85);
       if (role === 'browser' && rng.chance(0.5)) m.neckLen = rng.range(0.6, 1.1);
-      m.headSize = rng.range(0.22, 0.34);
-      m.snoutLen = rng.range(carn ? 0.35 : 0.3, carn ? 0.8 : 0.9);
-      m.legs.len = rng.range(0.35, 0.75) * (role === 'grazer' ? 1.15 : 1);
-      m.legs.thick = rng.range(0.08, 0.16) * (size > 2 ? 1.3 : 1);
-      m.legs.posture = rng.chance(0.6) ? 'digitigrade' : 'erect';
+      m.headSize = rng.range(0.27, 0.38);
+      m.snoutLen = rng.range(carn ? 0.3 : 0.25, carn ? 0.7 : 0.75);
+      m.legs.len = rng.range(0.5, 0.88) * (role === 'grazer' ? 1.15 : 1) * (role === 'urban_small' || role === 'grazer_small' ? 0.8 : 1);
+      m.legs.thick = rng.range(0.11, 0.19) * (size > 2 ? 1.3 : 1);
+      m.legs.posture = rng.chance(0.5) ? 'digitigrade' : 'erect';
       if (rng.chance(0.12)) m.legs.pairs = 3; // hexapod abyssal mammals
       if (role === 'grazer_small' && rng.chance(0.4) || rng.chance(0.06)) { m.legs.biped = true; m.legs.pairs = 1; m.arms.len = rng.range(0.15, 0.35); m.legs.len *= 1.3; }
-      m.ears = { size: rng.range(0.05, role === 'grazer_small' ? 0.5 : 0.25), shape: rng.pick(['pointed', 'round', 'long', 'tufted']) };
+      m.ears = { size: rng.range(0.12, role === 'grazer_small' ? 0.55 : 0.32), shape: rng.pick(['pointed', 'round', 'long', 'tufted']) };
       if ((diet === 'grazer' || diet === 'browser') && rng.chance(0.65)) {
         m.horns = { type: rng.pick(['straight', 'curved', 'antlers', 'spiral', 'nose']), count: rng.pick([1, 2, 2, 2, 4]), len: rng.range(0.15, 0.6), curve: rng.range(-1, 1) };
       }
       if (carn && rng.chance(0.3)) m.horns = { type: 'tusks', count: 2, len: rng.range(0.1, 0.25), curve: 0.5 };
-      m.tail = { len: rng.range(0.1, 1.0), thick: rng.range(0.1, 0.35), tip: rng.pick(['none', 'none', 'tuft', 'plume', 'club']) };
-      if (rng.chance(0.15)) m.spines = { count: rng.int(4, 10), len: rng.range(0.08, 0.25) };
-      m.eyes.count = rng.chance(0.15) ? 4 : 2;
-      m.eyes.size = rng.range(0.08, 0.18);
+      m.tail = { len: rng.chance(0.3) ? rng.range(0.06, 0.2) : rng.range(0.2, 0.7), thick: rng.range(0.18, 0.4), tip: rng.pick(['none', 'tuft', 'tuft', 'plume', 'plume', 'club']) };
+      if (rng.chance(0.12)) m.spines = { count: rng.int(4, 10), len: rng.range(0.08, 0.25) };
+      m.eyes.count = rng.chance(0.12) ? 4 : 2;
+      m.eyes.size = rng.range(0.08, 0.14);
       break;
     }
     case 'reptile': {
@@ -102,8 +104,8 @@ function morphology(rng, family, role, size) {
       m.bodyGirth = rng.range(0.16, 0.3);
       m.bodyHeight = m.bodyGirth * rng.range(0.7, 1.0);
       m.legs.posture = rng.chance(0.65) ? 'sprawl' : 'erect';
-      m.legs.len = rng.range(0.22, 0.5);
-      m.legs.thick = rng.range(0.07, 0.12);
+      m.legs.len = rng.range(0.24, 0.5);
+      m.legs.thick = rng.range(0.09, 0.15);
       m.neckLen = rng.range(0.1, 0.35);
       if (role === 'browser' && rng.chance(0.6)) m.neckLen = rng.range(0.7, 1.3);
       m.headSize = rng.range(0.2, 0.32);

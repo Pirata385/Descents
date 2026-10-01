@@ -72,12 +72,11 @@ export class Preview {
     const genes = individualGenes(sp, new RNG(sp.id * 31 + 7));
     genes.hue = 0; genes.light = 0; genes.sat = 0;
     const o = createCreatureObject(tpl, sp, genes);
-    const s = 1 / Math.max(0.5, sp.morph.size);
-    o.mesh.scale.setScalar(sp.morph.size * s);
+    o.mesh.scale.setScalar(1);
     const root = new THREE.Group();
     root.add(o.mesh);
     this.pivot.add(root);
-    const ind = { sp, obj: o, scale: sp.morph.size * s, state: 'idle', animSpeed: 0, seed: sp.id, airborne: false, look: 0, calling: 0, perched: true };
+    const ind = { sp, obj: o, scale: 1, state: 'idle', animSpeed: 0, seed: sp.id, airborne: false, look: 0, calling: 0, perched: true };
     this.obj = { root, ind, tpl, kind: 'creature' };
     const height = (sp.behavior.locomotion === 'ceiling' ? 0 : 0.35);
     if (sp.behavior.locomotion === 'ceiling') { o.mesh.rotation.z = 0; }

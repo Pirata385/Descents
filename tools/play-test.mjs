@@ -1,14 +1,15 @@
 // Headless gameplay test: spawn the player, walk, jump, fall, grapple.
 import { createRequire } from 'node:module';
-const require = createRequire('/opt/node22/lib/node_modules/');
-const { chromium } = require('playwright');
+let chromium;
+try { ({ chromium } = await import('playwright')); } catch { ({ chromium } = createRequire('/opt/node22/lib/node_modules/')('playwright')); }
+const BASE = process.env.BASE_URL || 'http://localhost:8099';
 const seed = process.argv[2] || '12345';
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
 const logs = [];
 page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`));
 page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
-await page.goto(`http://localhost:8099/index.html?debug=1&play=1&seed=${seed}&shadows=0&vd=0.6`);
+await page.goto(`${BASE}/index.html?debug=1&play=1&seed=${seed}&shadows=0&vd=0.6`);
 await page.waitForFunction(() => window.__ready || window.__error, null, { timeout: 240000 });
 const st = () => page.evaluate(() => { const p = window.__descents.player; return { x: +p.pos.x.toFixed(2), y: +p.pos.y.toFixed(2), z: +p.pos.z.toFixed(2), ground: p.onGround, mode: p.mode, hp: +p.health.toFixed(1), vy: +p.vel.y.toFixed(2) }; });
 const key = async (code, ms) => { await page.evaluate((c) => window.dispatchEvent(new KeyboardEvent('keydown', { code: c })), code); await page.waitForTimeout(ms); await page.evaluate((c) => window.dispatchEvent(new KeyboardEvent('keyup', { code: c })), code); };

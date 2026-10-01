@@ -31,7 +31,7 @@ export function bestiary(canvas, seedText) {
     const g1 = individualGenes(sp, rng), g2 = individualGenes(sp, rng);
     const parent = createCreatureObject(tpl, sp, g1);
     const child = createCreatureObject(tpl, sp, inheritGenes(sp, g1, g2, rng));
-    const x = (i % cols) * 3.2 - (cols - 1) * 1.6, z = Math.floor(i / cols) * 3.2;
+    const x = (i % cols) * 3.6 - (cols - 1) * 1.8, z = Math.floor(i / cols) * 3.4;
     const s = 1.6 / Math.max(0.6, sp.morph.size) * Math.min(1.6, Math.max(0.6, sp.morph.size));
     parent.mesh.scale.setScalar(1.25);
     parent.mesh.position.set(x, 0, -z);

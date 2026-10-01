@@ -135,8 +135,10 @@ export function generatePlan(seedInput, progress = () => {}) {
       if (!place || place === 'bowl') continue;
       const nodes = end ? t.nodes.slice().reverse() : t.nodes;
       const m = nodes[0];
-      const padY = Math.round((m.y - m.r * 0.55) * 2) / 2;
       const tier = place.startsWith('gallery') ? Number(place.slice(7)) : -1;
+      // mouths that open close together share one landing level
+      const near = pads.find((pd) => pd.tier === tier && pd.plain === (place === 'plain') && Math.hypot(pd.x - m.x, pd.z - m.z) < 40);
+      const padY = near ? near.y : Math.round((m.y - m.r * 0.55) * 2) / 2;
       pads.push({ x: m.x, z: m.z, r: 18, y: padY, tier, plain: place === 'plain' });
       // flatten tunnel nodes inside the pad, then keep the rest of the tunnel within a walkable slope
       let k = 0;
@@ -155,6 +157,8 @@ export function generatePlan(seedInput, progress = () => {}) {
     }
   }
   plan.pads = pads;
+  // entrances and exits refer to the final (pad-levelled) end nodes
+  for (const t of deep) { t.entrance = t.nodes[0]; t.exit = t.nodes[t.nodes.length - 1]; }
   plan.capsules = cavesToCapsules(caves);
   tempGen = new ColumnGen(plan);
   mark('deep');
@@ -323,6 +327,12 @@ export function generatePlan(seedInput, progress = () => {}) {
   // ---- routes
   const routes = [];
   const rindex = new RouteIndex(new SpatialGrid(8));
+  // landing pads act as level junctions: trails crossing them meet the pad floor
+  for (const pd of pads) {
+    const pts = [pd.x, pd.y, pd.z];
+    for (const rr of [4, 8, 12]) for (let k = 0; k < 12; k++) { const a = (k / 12) * Math.PI * 2; pts.push(pd.x + Math.cos(a) * rr, pd.y, pd.z + Math.sin(a) * rr); }
+    rindex.add({ id: -1, hw: 2.5, pts: Float32Array.from(pts) }, false);
+  }
   const addRoute = (style, pts3, meta, pin = true) => {
     const r = makeRoute(routes.length, style, pts3, meta);
     routes.push(r);
@@ -352,8 +362,14 @@ export function generatePlan(seedInput, progress = () => {}) {
   }
   // A* avoidance mask around cave mouths so trails do not fill them in
   const caveMouthMask = new Uint8Array(coarse.nx * coarse.nz);
+  const PM = {}, SM = {};
   for (const c of caves) {
     const ends = [c.entrance, c.exit, ...c.nodes.slice(0, 8), ...c.nodes.slice(-8)];
+    // stretches running just below the surface (entrance trenches) are kept free too
+    for (const nd of c.nodes) {
+      field.polar(nd.x, nd.z, PM);
+      if (field.surface(nd.x, nd.z, PM, SM) && SM.h - (nd.y + nd.r) < 4) ends.push(nd);
+    }
     for (const m of ends) {
       if (!m) continue;
       const ci = Math.floor((m.x - coarse.ox) / coarse.cs), cj = Math.floor((m.z - coarse.oz) / coarse.cs);
@@ -403,6 +419,8 @@ export function generatePlan(seedInput, progress = () => {}) {
       if (ci >= 0 && cj >= 0 && ci < coarse.nx && cj < coarse.nz) occupied[cj * coarse.nx + ci] = 1;
     }
   };
+  // the gate stairways are already there: trails leave them instead of running alongside
+  for (const r of journeys) occupy(r);
   const goalFree = (n) => {
     const x = coarse.ox + ((n % coarse.nx) + 0.5) * coarse.cs, z = coarse.oz + (((n / coarse.nx) | 0) + 0.5) * coarse.cs;
     return Math.hypot(x - station.x, z - station.z) < 70;
@@ -421,6 +439,17 @@ export function generatePlan(seedInput, progress = () => {}) {
         if (nb && nb.journey) return { pts: pts.slice(0, k).concat([[nb.x, nb.z]]), y: nb.y };
       }
       return null;
+    };
+    // a trail that first runs along an existing route starts where it leaves it
+    const leaveNetwork = (pts, hw, y0) => {
+      let k = 0, last = null;
+      for (; k < pts.length; k++) {
+        const nb = rindex.nearest(pts[k][0], pts[k][1], hw + 1.5);
+        if (!nb || !nb.journey) break;
+        last = nb;
+      }
+      if (k < 3 || !last || k >= pts.length - 2) return { pts, y: y0 };
+      return { pts: [[last.x, last.z], ...pts.slice(k)], y: last.y };
     };
     const plan2 = (ax, az, bx, bz, opts) => {
       const cost = trailCost(coarse, hydro, { waterDistGrid, avoid: caveMouthMask, occupied, goalFree, ...opts });
@@ -443,8 +472,10 @@ export function generatePlan(seedInput, progress = () => {}) {
         a.push([n0.x - (n1.x - n0.x) / d0 * 3.5, n0.z - (n1.z - n0.z) / d0 * 3.5]);
         b.unshift([nl.x + (nl.x - nl1.x) / d1 * 3.5, nl.z + (nl.z - nl1.z) / d1 * 3.5]);
         const entryFloor = n0.y - n0.r * 0.55;
-        const ya = prof(a, 'trail', { startY: se.y, endY: entryFloor + 0.2 });
-        legs.push(addRoute('trail', a.map((p, k) => [p[0], ya[k], p[1]]), { name: `${trailNames[2]} (upper)`, kind: 'trail', validate: true }));
+        const la = leaveNetwork(a, STYLES.trail.hw, se.y);
+        const a2 = la.pts;
+        const ya = prof(a2, 'trail', { startY: la.y, endY: entryFloor + 0.2 });
+        legs.push(addRoute('trail', a2.map((p, k) => [p[0], ya[k], p[1]]), { name: `${trailNames[2]} (upper)`, kind: 'trail', validate: true }));
         best.onRoute = true;
         const exitFloor = nl.y - nl.r * 0.55;
         let endB = station.y;
@@ -460,8 +491,10 @@ export function generatePlan(seedInput, progress = () => {}) {
       if (a) {
         const style = kind === 'road' ? 'country' : 'trail';
         let endY = station.y;
+        const lv = leaveNetwork(a, STYLES[style].hw, se.y);
+        a = lv.pts;
         if (i > 0) { const j = joinNetwork(a, STYLES[style].hw); if (j) { a = j.pts; endY = j.y; } }
-        const ya = prof(a, style, { startY: se.y, endY });
+        const ya = prof(a, style, { startY: lv.y, endY });
         legs.push(addRoute(style, a.map((p, k) => [p[0], ya[k], p[1]]), { name: trailNames[i] || 'Old Trail', kind: kind === 'road' ? 'road' : 'trail', validate: true }));
       }
     }
@@ -491,13 +524,15 @@ export function generatePlan(seedInput, progress = () => {}) {
       const n0 = throat.nodes[0], n1 = throat.nodes[1];
       const d0 = Math.hypot(n1.x - n0.x, n1.z - n0.z) || 1;
       const ap = [n0.x - (n1.x - n0.x) / d0 * 7, n0.z - (n1.z - n0.z) / d0 * 7];
-      // start from the closest point of the journey network
+      // start from a nearby point of the journey network that allows a walkable grade
+      const mouthY = n0.y - n0.r * 0.55;
       let best = null, bd = Infinity;
       for (const r of journeys) {
         if (r.type === 5 || r.style === 'ledge') continue;
         for (let k = 0; k < r.pts.length; k += 3) {
           const d = Math.hypot(r.pts[k] - ap[0], r.pts[k + 2] - ap[1]);
-          if (d < bd) { bd = d; best = { x: r.pts[k], y: r.pts[k + 1], z: r.pts[k + 2] }; }
+          const score = d + Math.max(0, Math.abs(r.pts[k + 1] - mouthY) - 0.3 * d) * 6;
+          if (score < bd) { bd = score; best = { x: r.pts[k], y: r.pts[k + 1], z: r.pts[k + 2] }; }
         }
       }
       if (!best) return null;
@@ -534,6 +569,7 @@ export function generatePlan(seedInput, progress = () => {}) {
   }
   journeys.push(addRoute('faultLedge', fault.pts.map((p) => [p[0], p[2], p[1]]), { name: 'Threshold Descent', kind: 'ledge', validate: true }, false));
   // gallery trails: connect each spiral window to the deep tunnel mouths in that tier
+  const galleryTrailCount = [];
   for (const w of galleryWindows) {
     const g = params.galleries[w.tier];
     const mouths = [];
@@ -589,7 +625,8 @@ export function generatePlan(seedInput, progress = () => {}) {
       const ys = prof(pts, 'galleryTrail', { startY: w.y, endY: endFloor, band: [g.yTop - 4, g.yTop - g.height - 12] });
       const pts3 = pts.map((p, i) => [p[0], ys[i], p[1]]);
       void tail; void resampleTail;
-      journeys.push(addRoute('galleryTrail', pts3, { name: `Gallery Path ${w.tier + 1}`, kind: 'trail', validate: true }));
+      const tierCount = (galleryTrailCount[w.tier] = (galleryTrailCount[w.tier] || 0) + 1);
+      journeys.push(addRoute('galleryTrail', pts3, { name: `${['Forest Trail', 'Lower Canopy Trail', 'Deep Grove Trail'][w.tier] || 'Gallery Trail'} ${['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'][tierCount - 1] || tierCount}`, kind: 'trail', validate: true }));
     }
   }
   for (const c of caves) {
@@ -606,6 +643,47 @@ export function generatePlan(seedInput, progress = () => {}) {
     journeys.push(addRoute('plainTrail', inside.concat(out.map((p, k) => [p[0], ys[k], p[1]])), { name: 'Root Chute Mouth', kind: 'trail', validate: true }));
   }
   plan.routes = routes;
+  // tunnels that pass just beneath a route are lowered locally (with a walkable
+  // slope) so the route can bridge over them and both stay passable
+  {
+    const cellsR = new Map();
+    const ck = (x, z) => `${Math.floor(x / 8)}:${Math.floor(z / 8)}`;
+    for (const r of routes) {
+      const p = r.pts;
+      for (let i = 0; i < p.length; i += 3) {
+        const k = ck(p[i], p[i + 2]);
+        let l = cellsR.get(k); if (!l) cellsR.set(k, (l = []));
+        l.push(p[i], p[i + 1], p[i + 2], r.hw || 2);
+      }
+    }
+    let lowered = 0;
+    for (const c of caves) {
+      const n = c.nodes.length;
+      if (n < 20) continue;
+      const need = new Float32Array(n);
+      for (let i = 8; i < n - 8; i++) {
+        const nd = c.nodes[i];
+        const floor = nd.y - nd.r * 0.55;
+        const cx = Math.floor(nd.x / 8), cz = Math.floor(nd.z / 8);
+        for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+          const l = cellsR.get(`${cx + dx}:${cz + dz}`);
+          if (!l) continue;
+          for (let q = 0; q < l.length; q += 4) {
+            if (Math.hypot(l[q] - nd.x, l[q + 2] - nd.z) > l[q + 3] + nd.r) continue;
+            const gap = l[q + 1] - floor;
+            if (gap > 0.3 && gap < 3.2) need[i] = Math.max(need[i], 3.2 - gap);
+          }
+        }
+      }
+      // spread the dip along the tunnel at a walkable slope
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 1; i < n; i++) { const d = Math.hypot(c.nodes[i].x - c.nodes[i - 1].x, c.nodes[i].z - c.nodes[i - 1].z); need[i] = Math.max(need[i], need[i - 1] - 0.35 * d); }
+        for (let i = n - 2; i >= 0; i--) { const d = Math.hypot(c.nodes[i + 1].x - c.nodes[i].x, c.nodes[i + 1].z - c.nodes[i].z); need[i] = Math.max(need[i], need[i + 1] - 0.35 * d); }
+      }
+      for (let i = 0; i < n; i++) if (need[i] > 0) { c.nodes[i].y -= need[i]; lowered++; }
+    }
+    if (lowered) plan.capsules = cavesToCapsules(caves);
+  }
   mark('l2routes');
 
   // ---- final column generator and validation
