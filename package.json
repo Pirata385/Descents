@@ -1,0 +1,12 @@
+{
+  "name": "descents",
+  "version": "0.1.0",
+  "description": "Descents - a procedural first-person abyss exploration game for the browser.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node tests/run-all.js"
+  },
+  "license": "MIT"
+}
