@@ -50,10 +50,31 @@ await page.evaluate(() => window.__app.resume());
 await page.keyboard.press('KeyP');
 await page.waitForTimeout(800);
 await shot('10-pause');
+const snapshot = () => page.evaluate(() => {
+  const g = window.__descents;
+  return {
+    seed: g.plan.seed, world: g.plan.landmarks.map((l) => l.name).join('|').length + ':' + g.plan.species.map((s) => s.name).join('|'),
+    pos: g.player.pos.toArray().map((v) => Math.round(v * 10) / 10), species: g.discovery.species.size, landmarks: g.discovery.landmarks.size,
+    explored: g.mapData.bands.map((b) => b.count), collected: g.artifacts.collected.size, time: Math.round(g.gameTime),
+  };
+});
+const before = await snapshot();
 await page.click('[data-act=save]');
 await page.waitForTimeout(1500);
 const saves = await page.evaluate(() => JSON.parse(localStorage.getItem('descents.saves.v1') || '[]'));
 console.log('saves', JSON.stringify(saves));
+// reload the page and continue the expedition
+await page.reload();
+await page.waitForSelector('.title-panel');
+await shot('11-title-continue');
+await page.click('[data-act=continue]');
+await page.waitForFunction(() => window.__ready || window.__error, null, { timeout: 300000 });
+const after = await snapshot();
+const same = before.seed === after.seed && before.world === after.world && before.species === after.species && before.landmarks === after.landmarks
+  && before.explored.join() === after.explored.join() && before.pos.every((v, i) => Math.abs(v - after.pos[i]) < 0.6);
+console.log('before', JSON.stringify({ ...before, world: before.world.length }));
+console.log('after ', JSON.stringify({ ...after, world: after.world.length }));
+console.log(same ? 'SAVE/LOAD OK: same world, position and progress restored' : 'SAVE/LOAD MISMATCH');
 console.log('--- console errors/warnings ---');
 for (const l of logs.slice(-30)) console.log(l);
 await browser.close();

@@ -133,7 +133,7 @@ export class Journal {
         <div class="det-facts">
           <div class="obs"><span>Observation</span><div class="bar"><i style="width:${pct}%"></i></div><b>${pct}%</b></div>
           <h4>Appearance</h4><p>${esc(describeAppearance(sp))}</p>
-          <h4>Habitat</h4><p>${e.habitats.size ? [...e.habitats].map(esc).join('; ') : '—'}. First recorded at ${Math.round(e.firstDepth)} m depth.</p>
+          <h4>Habitat</h4><p>${e.habitats.size ? `${[...e.habitats].map(esc).join('; ')}.` : 'Not yet seen in its own surroundings.'} First recorded at ${Math.round(e.firstDepth)} m depth.</p>
           <h4>Diet</h4><p>${has('diet') ? esc(DIET_TEXT[b.diet] || b.diet) : lock('diet')}</p>
           <h4>Behaviour</h4>
           <p>${has('locomotion') ? `It ${esc(LOCO_TEXT[b.locomotion] || b.locomotion)}. ` : ''}${has('activity') ? `${act}. ` : ''}${has('social') ? `${social}.` : ''}${!has('locomotion') ? lock('locomotion') : ''}</p>

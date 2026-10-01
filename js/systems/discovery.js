@@ -236,6 +236,10 @@ export class Discovery {
     const a = d.a;
     if (!a || !this.canWitness(a.pos, type === 'kill' || type === 'hunt' ? 90 : 60)) return;
     const name = (x) => (x && x.sp && x.sp.id >= 0 ? x.sp.name : null);
+    // every creature taking part was seen where it lives
+    for (const x of [a, d.prey, d.b, d.host, d.from]) {
+      if (x && x.sp && x.sp.id >= 0 && x.pos && x.band !== undefined && (type !== 'call')) this.entry(x.sp).habitats.add(this.habitatText(x));
+    }
     switch (type) {
       case 'hunt': case 'kill': {
         const [, ta, , tb] = INTERACTION_TEXT[type](a.sp.name, d.prey.sp.name);

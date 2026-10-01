@@ -20,7 +20,7 @@ import { FAMILY_LABEL } from '../creatures/genetics.js';
 const SETTINGS_KEY = 'descents.settings.v1';
 const DEFAULT_SETTINGS = {
   viewDistance: 1.0, shadows: true, fov: 75, sensitivity: 1, invertY: false, pixelRatio: 1.5, particles: 1,
-  volMaster: 0.8, volMusic: 0.5, volAmbience: 0.7, volEffects: 0.8, showArm: true, showFps: false,
+  volMaster: 0.8, volMusic: 0.5, volAmbience: 0.7, volEffects: 0.8, showArm: true, showFps: false, autoQuality: true,
 };
 
 const TIPS = [
@@ -168,6 +168,7 @@ export class App {
         ${slider('pixelRatio', 'Resolution scale', 0.5, 2, 0.25, (v) => `${v}×`)}
         ${slider('particles', 'Particles', 0, 1, 0.25, (v) => `${Math.round(v * 100)}%`)}
         ${check('shadows', 'Shadows')}
+        ${check('autoQuality', 'Adapt view distance to keep the frame rate smooth')}
         ${slider('fov', 'Field of view', 60, 100, 1, (v) => `${v}°`)}
         ${check('showArm', 'Show the grappling arm')}
         ${check('showFps', 'Show frame rate')}
@@ -404,7 +405,7 @@ export class App {
     this.hud.setVisible(false);
     this.journal = new Journal(g, this.ui);
     this.journal.onClose = () => { if (this.state === 'journal') { this.setState('resume'); this.showClickToPlay(); } };
-    g.systems.push({ lateUpdate: (dt) => { this.hud.update(dt); this.audioUpdate(dt); } });
+    g.systems.push({ lateUpdate: (dt) => { this.hud.update(dt); this.audioUpdate(dt); this.adaptQuality(); } });
     this.wireEvents(g);
     this.autosaveTimer = 120;
   }
@@ -519,6 +520,27 @@ export class App {
     // autosave
     this.autosaveTimer -= dt;
     if (this.autosaveTimer <= 0) { this.autosaveTimer = 120; if (p.mode !== 'dead' && p.onGround) this.save(true); }
+  }
+
+  /** Keep the frame rate playable on slower machines by trading view distance. */
+  adaptQuality() {
+    const now = performance.now();
+    const ms = this.lastFrameT ? now - this.lastFrameT : 16;
+    this.lastFrameT = now;
+    if (ms > 250) return; // a hitch (tab switch, loading), not a trend
+    this.frameEma = (this.frameEma ?? 16) * 0.97 + ms * 0.03;
+    const s = this.settings, g = this.game;
+    if (!s.autoQuality || this.state !== 'playing') return;
+    this.qualityT = (this.qualityT || 0) + ms / 1000;
+    if (this.qualityT < 4) return;
+    this.qualityT = 0;
+    const cur = g.chunks.quality ?? s.viewDistance;
+    if (this.frameEma > 40 && cur > 0.55) {
+      g.chunks.setQuality(Math.max(0.5, cur - 0.1));
+      if (!this.qualityNoted) { this.qualityNoted = true; this.hud.notify('Lowering view distance to keep the frame rate smooth (see Settings).', 'info', 6); }
+    } else if (this.frameEma < 18 && cur < s.viewDistance - 0.01) {
+      g.chunks.setQuality(Math.min(s.viewDistance, cur + 0.1));
+    }
   }
 
   audioUpdate(dt) {

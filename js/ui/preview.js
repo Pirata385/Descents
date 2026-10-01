@@ -72,15 +72,20 @@ export class Preview {
     const genes = individualGenes(sp, new RNG(sp.id * 31 + 7));
     genes.hue = 0; genes.light = 0; genes.sat = 0;
     const o = createCreatureObject(tpl, sp, genes);
-    o.mesh.scale.setScalar(1);
+    // frame the bind-pose bounds: feet on the ground, centred, about one unit tall/long
+    const g = tpl.geometry;
+    if (!g.boundingBox) g.computeBoundingBox();
+    const box = g.boundingBox, size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+    const k = 1.15 / Math.max(size.x, size.y, size.z, 0.2);
+    o.mesh.scale.setScalar(k);
+    o.mesh.position.set(-c.x * k, -box.min.y * k, -c.z * k);
     const root = new THREE.Group();
     root.add(o.mesh);
+    const frameH = size.y * k * 0.5;
     this.pivot.add(root);
-    const ind = { sp, obj: o, scale: 1, state: 'idle', animSpeed: 0, seed: sp.id, airborne: false, look: 0, calling: 0, perched: true };
+    const ind = { sp, obj: o, scale: k, state: 'idle', animSpeed: 0, seed: sp.id, airborne: false, look: 0, calling: 0, perched: true };
     this.obj = { root, ind, tpl, kind: 'creature' };
-    const height = (sp.behavior.locomotion === 'ceiling' ? 0 : 0.35);
-    if (sp.behavior.locomotion === 'ceiling') { o.mesh.rotation.z = 0; }
-    this.frame(1.0, height);
+    this.frame(0.62, frameH);
   }
 
   showArtifact(art) {
