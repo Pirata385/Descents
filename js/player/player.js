@@ -108,10 +108,17 @@ export class Player {
   wishDir(out) {
     const inp = this.input;
     let fx = 0, fz = 0;
-    if (inp.is('forward')) fz -= 1;
-    if (inp.is('back')) fz += 1;
-    if (inp.is('left')) fx -= 1;
-    if (inp.is('right')) fx += 1;
+    this.analogMag = null;
+    if (inp.axis.active) {
+      // touch stick: analog direction and magnitude
+      const m = Math.hypot(inp.axis.x, inp.axis.y);
+      if (m > 0.12) { fx = inp.axis.x; fz = -inp.axis.y; this.analogMag = Math.min(1, m); }
+    } else {
+      if (inp.is('forward')) fz -= 1;
+      if (inp.is('back')) fz += 1;
+      if (inp.is('left')) fx -= 1;
+      if (inp.is('right')) fx += 1;
+    }
     const l = Math.hypot(fx, fz);
     if (l > 0) { fx /= l; fz /= l; }
     const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
@@ -140,6 +147,8 @@ export class Player {
     // horizontal acceleration
     let speed = this.inWater ? SWIM * this.mods.swim : this.crouching ? CROUCH : (inp.is('run') ? RUN * this.mods.run : WALK);
     speed *= this.mods.move;
+    // a half-pushed stick walks slowly
+    if (this.analogMag !== null && !inp.is('run')) speed *= clamp(this.analogMag / 0.8, 0.35, 1);
     if (this.zoomed) speed = Math.min(speed, WALK * 0.6);
     const accel = this.onGround ? 40 : this.inWater ? 10 : (grapple && grapple.attached ? 9 : 5.5);
     const tvx = moving ? wish.x * speed : 0, tvz = moving ? wish.z * speed : 0;
@@ -404,7 +413,8 @@ export class Player {
     this.landDip *= Math.exp(-dt * 7);
     const deadDrop = this.mode === 'dead' ? Math.min(1.3, this.deathTimer * 1.2) : 0;
     cam.position.set(this.pos.x, this.pos.y + this.eyeCur + Math.sin(this.bob) * bobAmt - this.landDip - deadDrop, this.pos.z);
-    const roll = this.mode === 'dead' ? Math.min(0.9, this.deathTimer * 0.8) : -(this.input.is('right') - this.input.is('left')) * 0.012;
+    const strafe = this.input.axis.active ? this.input.axis.x : this.input.is('right') - this.input.is('left');
+    const roll = this.mode === 'dead' ? Math.min(0.9, this.deathTimer * 0.8) : -strafe * 0.012;
     this.rollCur = lerp(this.rollCur || 0, roll, 1 - Math.exp(-dt * 6));
     cam.rotation.set(this.pitch, this.yaw, this.rollCur, 'YXZ');
     // field of view: running and fast falls widen it, observing narrows it

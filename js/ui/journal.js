@@ -101,7 +101,7 @@ export class Journal {
       <div class="catalog">
         <div class="cat-list">
           <div class="cat-count">${known.length} species recorded</div>
-          ${list || '<div class="muted pad">No creatures recorded yet. Look at creatures to record them; hold <b>F</b> to observe them closely.</div>'}
+          ${list || `<div class="muted pad">No creatures recorded yet. Look at creatures to record them; hold <b>${this.game.touch ? 'Observe' : 'F'}</b> to observe them closely.</div>`}
         </div>
         <div class="cat-detail"></div>
       </div>`;
@@ -168,7 +168,7 @@ export class Journal {
       <div class="catalog">
         <div class="cat-list">
           <div class="cat-count">${items.length} artifacts recovered</div>
-          ${items.map((a) => `<button class="cat-item ${a.id === this.selArtifact ? 'active' : ''}" data-art="${a.id}"><span class="grade g${a.grade}">${['IV', 'III', 'II', 'I', '✶'][a.grade]}</span><span class="nm">${esc(a.name)}</span>${A.equipped.includes(a.id) ? '<span class="pct">worn</span>' : ''}</button>`).join('') || '<div class="muted pad">No artifacts recovered yet. They lie in ruins, caves, atop spires and in other hard-to-reach places. Press <b>E</b> to take one.</div>'}
+          ${items.map((a) => `<button class="cat-item ${a.id === this.selArtifact ? 'active' : ''}" data-art="${a.id}"><span class="grade g${a.grade}">${['IV', 'III', 'II', 'I', '✶'][a.grade]}</span><span class="nm">${esc(a.name)}</span>${A.equipped.includes(a.id) ? '<span class="pct">worn</span>' : ''}</button>`).join('') || `<div class="muted pad">No artifacts recovered yet. They lie in ruins, caves, atop spires and in other hard-to-reach places. ${this.game.touch ? 'Tap <b>Take</b>' : 'Press <b>E</b>'} to take one.</div>`}
           ${spotted.length ? `<div class="cat-group">Sighted, not taken</div>${spotted.map((a) => `<div class="cat-item ghost"><span class="grade">?</span><span class="nm">Unknown object — ${esc(a.site.place)}</span></div>`).join('')}` : ''}
         </div>
         <div class="cat-detail"></div>
@@ -244,12 +244,12 @@ export class Journal {
       <div class="equip">
         <div class="equip-left">
           <h3>Mechanical Grappling Arm</h3>
-          <p class="muted">The arm you were given by the Guild. Range ${Math.round(g.grapple.range)} m. <b>Left click</b> fires the claw, <b>right click / Q / wheel</b> reels in, <b>Z / wheel</b> pays out, <b>X</b> or click again releases.</p>
+          <p class="muted">The arm you were given by the Guild. Range ${Math.round(g.grapple.range)} m. ${g.touch ? '<b>Arm</b> fires the claw where you aim, hold <b>Reel in</b> or <b>Pay out</b> while it is attached, tap <b>Release</b> or <b>Jump</b> to let go.' : '<b>Left click</b> fires the claw, <b>right click / Q / wheel</b> reels in, <b>Z / wheel</b> pays out, <b>X</b> or click again releases.'}</p>
           <h3>Worn artifacts</h3>
           <div class="slots">${slots.map(card).join('')}</div>
           <h3>Combined effects</h3>
           <p>${summary.length ? summary.map(esc).join(' · ') : '<span class="muted">No active effects.</span>'}</p>
-          ${abil.length ? `<h3>Ability on R</h3><div class="row">${abil.map((a, i) => `<button class="btn small ${i === A.activeIndex % abil.length ? 'active' : ''}" data-ab="${i}">${esc(a.name)}</button>`).join('')}</div>` : ''}
+          ${abil.length ? `<h3>Ability on ${g.touch ? 'the Ability button' : 'R'}</h3><div class="row">${abil.map((a, i) => `<button class="btn small ${i === A.activeIndex % abil.length ? 'active' : ''}" data-ab="${i}">${esc(a.name)}</button>`).join('')}</div>` : ''}
         </div>
         <div class="equip-right">
           <h3>Carried</h3>

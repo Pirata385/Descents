@@ -30,7 +30,33 @@ On the title screen, type any seed (or roll a random one) and choose
 **Begin a new descent**. Saved expeditions appear under **Continue** and
 **Load expedition**.
 
-### Controls
+### Playing on a phone or tablet
+
+Descents runs in mobile browsers in **landscape**. Touch controls switch on
+automatically on phones and tablets (or via *Settings → Touch → Touch
+controls*). Starting a game goes full screen and locks landscape where the
+browser allows it; turning the device upright pauses the game and asks you to
+rotate back. Adding the page to the home screen launches it full screen in
+landscape. The first launch on a mobile device picks lighter graphics
+settings (shorter view distance, no shadows, fewer particles), and view
+distance adapts automatically if the frame rate drops.
+
+| Touch | Action |
+| --- | --- |
+| Left thumb | Drag to move — the stick appears where you touch; push it fully to run |
+| Right side | Drag to look around |
+| **Jump** | Jump · hold while pushing into rock to climb · leap off a wall |
+| **Arm** | Fire the grappling arm at the centre of the view (**Release** while attached) |
+| **Reel in** / **Pay out** | Appear while the claw is attached — hold to wind or let out cable |
+| **Crouch** | Crouch · drop from a wall |
+| **Observe** (hold) | Zoom in and study a creature |
+| **Take** | Appears beside an artifact |
+| **Ability** · **Lamp** | Active artifact ability (when worn) · explorer's lamp |
+| ☰ · map · book | Pause · map · journal (pinch to zoom the map) |
+
+Button size, opacity and look speed are adjustable under *Settings → Touch*.
+
+### Controls (keyboard and mouse)
 
 | Key | Action |
 | --- | --- |
@@ -202,7 +228,8 @@ whose scale and instruments change with each layer.
 
 ```
 index.html            entry page (canvas, UI root, import map)
-css/                  style.css (menus), hud.css, journal.css
+css/                  style.css (menus), hud.css, journal.css, touch.css (mobile)
+manifest.webmanifest  home-screen install: full screen, landscape
 lib/three/            three.js (vendored)
 server.js             tiny static server (npm start)
 js/main.js            boots the app (or debug views via URL parameters)
@@ -227,7 +254,7 @@ js/creatures/         genetics, creature meshes, procedural animation, ecosystem
 js/artifacts/         artifact generation, models, in-world artifact system
 js/systems/           discovery, map exploration data, environment probe, saves
 js/audio/             procedural audio engine
-js/ui/                app shell (menus), HUD, journal, maps, 3D previews
+js/ui/                app shell (menus), HUD, journal, maps, 3D previews, touch controls
 tests/                automated tests (npm test)
 tools/                browser tests, screenshots, debug renders
 changelogs/           one .txt file per version (see CHANGELOG.md)
@@ -277,6 +304,7 @@ npm run test:ui        # menus, HUD, journal tabs, pause, saving (screenshots in
 npm run test:play      # observe a creature, take an artifact, visit every layer
 npm run test:traverse  # an autopilot walks every guaranteed route, city → Layer 3, with real physics
 npm run test:grapple   # climb a rim cliff using only the grappling arm
+npm run test:mobile    # emulated phone: touch controls, landscape/portrait, journal, pause, layout
 ```
 
 Set `BASE_URL` if the server runs elsewhere.

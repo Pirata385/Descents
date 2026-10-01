@@ -79,17 +79,51 @@ export class TopDownMap {
     el.querySelector('[data-act=center]').onclick = () => { this.follow = true; this.draw(); };
     el.querySelector('[data-act=zin]').onclick = () => { this.zoom = clamp(this.zoom * 1.5, 0.15, 12); this.draw(); };
     el.querySelector('[data-act=zout]').onclick = () => { this.zoom = clamp(this.zoom / 1.5, 0.15, 12); this.draw(); };
-    let drag = null;
-    this.canvas.onpointerdown = (e) => { drag = { x: e.clientX, y: e.clientY, cx: this.cx, cz: this.cz }; this.canvas.setPointerCapture(e.pointerId); };
+    // one finger / mouse drags the chart, two fingers pinch to zoom
+    const pts = new Map();
+    let drag = null, pinch = null;
+    const startDrag = () => {
+      const [a] = [...pts.values()];
+      drag = a ? { x: a.x, y: a.y, cx: this.cx, cz: this.cz } : null;
+    };
+    const startPinch = () => {
+      const [a, b] = [...pts.values()];
+      const r = this.canvas.getBoundingClientRect();
+      const mx = (a.x + b.x) / 2 - r.left, my = (a.y + b.y) / 2 - r.top;
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, zoom: this.zoom, wx: this.cx + (mx - r.width / 2) / this.zoom, wz: this.cz + (my - r.height / 2) / this.zoom };
+    };
+    this.canvas.onpointerdown = (e) => {
+      this.canvas.setPointerCapture(e.pointerId);
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2) { drag = null; startPinch(); } else if (pts.size === 1) startDrag();
+    };
     this.canvas.onpointermove = (e) => {
-      if (drag) {
+      if (!pts.has(e.pointerId)) { this.hoverAt(e); return; }
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && pts.size >= 2) {
+        const [a, b] = [...pts.values()];
+        const r = this.canvas.getBoundingClientRect();
+        const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        this.zoom = clamp(pinch.zoom * (d / pinch.d), 0.15, 12);
+        const mx = (a.x + b.x) / 2 - r.left, my = (a.y + b.y) / 2 - r.top;
+        this.cx = pinch.wx - (mx - r.width / 2) / this.zoom;
+        this.cz = pinch.wz - (my - r.height / 2) / this.zoom;
+        this.follow = false;
+        this.draw();
+      } else if (drag) {
         this.follow = false;
         this.cx = drag.cx - (e.clientX - drag.x) / this.zoom;
         this.cz = drag.cz - (e.clientY - drag.y) / this.zoom;
         this.draw();
-      } else this.hoverAt(e);
+      }
     };
-    this.canvas.onpointerup = () => { drag = null; };
+    const up = (e) => {
+      pts.delete(e.pointerId);
+      pinch = null;
+      if (pts.size === 1) startDrag(); else drag = null;
+    };
+    this.canvas.onpointerup = up;
+    this.canvas.onpointercancel = up;
     this.canvas.onwheel = (e) => {
       e.preventDefault();
       const r = this.canvas.getBoundingClientRect();

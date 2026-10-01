@@ -236,11 +236,10 @@ export class Grapple {
     this.clawDock = new THREE.Object3D();
     this.clawDock.position.set(0, 0.04, -0.34);
     arm.add(this.clawDock);
-    arm.position.set(0.26, -0.27, -0.46);
     arm.rotation.set(0.08, 0.06, 0);
-    arm.scale.setScalar(0.78);
     this.arm = arm;
     this.drum = drum;
+    this.setTouchLayout(!!this.game.touch);
     cam.add(arm);
     // the arm is drawn over the world so it never clips into nearby rock
     arm.traverse((o) => { if (o.isMesh) { o.renderOrder = 999; o.material = o.material.clone(); o.material.depthTest = false; o.material.depthWrite = false; } });
@@ -257,6 +256,13 @@ export class Grapple {
     this.cable.frustumCulled = false;
     this.cable.visible = false;
     this.game.renderer.scene.add(this.cable);
+  }
+
+  /** Smaller and lower on touch screens so it stays clear of the thumbs' buttons. */
+  setTouchLayout(touch) {
+    this.armBase = touch ? { x: 0.17, y: -0.31, z: -0.5, s: 0.55 } : { x: 0.26, y: -0.27, z: -0.46, s: 0.78 };
+    this.arm.position.set(this.armBase.x, this.armBase.y, this.armBase.z);
+    this.arm.scale.setScalar(this.armBase.s);
   }
 
   makeClaw(metal, dark) {
@@ -287,12 +293,12 @@ export class Grapple {
 
   updateVisuals(dt) {
     this.recoil = Math.max(0, (this.recoil || 0) - dt * 5);
-    this.arm.position.z = -0.46 + this.recoil * 0.06;
+    this.arm.position.z = this.armBase.z + this.recoil * 0.06;
     this.arm.rotation.x = 0.08 + this.recoil * 0.15;
     if (this.reeling) this.drum.rotation.x += dt * 25; else if (this.paying) this.drum.rotation.x -= dt * 12;
     const p = this.player;
     const hs = Math.hypot(p.vel.x, p.vel.z);
-    this.arm.position.y = -0.27 + Math.sin(p.bob * 0.5) * 0.008 * Math.min(1, hs / 4);
+    this.arm.position.y = this.armBase.y + Math.sin(p.bob * 0.5) * 0.008 * Math.min(1, hs / 4);
     this.arm.visible = p.mode !== 'dead' && !p.zoomed && this.game.settings.showArm !== false;
     const tip = this.armTip(this._tip || (this._tip = new THREE.Vector3()));
     if (this.state === 'idle') {

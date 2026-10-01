@@ -122,3 +122,7 @@ table.controls td:first-child { white-space: nowrap; width: 40%; }
   .logo { font-size: 40px; }
   .settings .set-row { grid-template-columns: 1fr 110px 46px; }
 }
+
+/* long panels keep their closing buttons in reach */
+.panel > .row:last-child { position: sticky; bottom: -24px; margin: 14px -32px -24px; padding: 10px 32px 14px; background: linear-gradient(rgba(16, 19, 22, 0.85), rgba(16, 19, 22, 0.98) 30%); border-top: 1px solid rgba(255, 255, 255, 0.06); }
+@media (max-height: 540px) { .panel > .row:last-child { bottom: -12px; margin: 10px -18px -12px; padding: 8px 18px 10px; } }

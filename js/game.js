@@ -127,6 +127,16 @@ export class Game {
   }
 }
 
+/** Draw the world without advancing the simulation (waiting screens, after a resize). */
+Game.prototype.renderOnly = function renderOnly(dt) {
+  this.chunkTimer -= dt;
+  if (this.chunkTimer <= 0) { this.chunkTimer = 0.25; this.chunks.update(this.focusPoint()); }
+  const p = this.focusPoint();
+  const info = this.world.info(p.x, p.y, p.z);
+  this.renderer.update(dt, p, { layer: info.layer, zone: info.zone, y: p.y, enclosed: this.envEnclosed ?? 0, timeOfDay: this.timeOfDay });
+  this.renderer.render();
+};
+
 /** Free-flying debug camera used by the test harness (?debug=1). */
 export class DebugCamera {
   constructor(game, pose) {

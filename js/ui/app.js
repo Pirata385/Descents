@@ -13,6 +13,7 @@ import { EnvironmentProbe } from '../systems/environment.js';
 import { SaveStore, captureSave, applySave, exportSave, validateSave } from '../systems/save.js';
 import { AudioEngine } from '../audio/audio.js';
 import { HUD } from './hud.js';
+import { TouchControls, detectTouch } from './touch.js';
 import { Journal } from './journal.js';
 import { LAYERS } from '../world/layers.js';
 import { FAMILY_LABEL } from '../creatures/genetics.js';
@@ -21,7 +22,10 @@ const SETTINGS_KEY = 'descents.settings.v1';
 const DEFAULT_SETTINGS = {
   viewDistance: 1.0, shadows: true, fov: 75, sensitivity: 1, invertY: false, pixelRatio: 1.5, particles: 1,
   volMaster: 0.8, volMusic: 0.5, volAmbience: 0.7, volEffects: 0.8, showArm: true, showFps: false, autoQuality: true,
+  touchControls: 'auto', touchLook: 1, touchSize: 1, touchOpacity: 0.85,
 };
+// lighter defaults the first time the game runs on a phone or tablet
+const MOBILE_DEFAULTS = { viewDistance: 0.6, pixelRatio: 1, shadows: false, particles: 0.5, antialias: false };
 
 const TIPS = [
   'The Abyss Eye sits at the centre of the world. Every route down begins at its rim.',
@@ -36,6 +40,13 @@ const TIPS = [
   'Equipped artifacts reveal their properties over time.',
 ];
 
+const TOUCH_CONTROLS = [
+  ['Left thumb', 'Drag to move · push fully to run'], ['Right side', 'Drag to look around'], ['Jump', 'Jump · hold while pushing into a wall to climb'],
+  ['Arm', 'Fire / release the grappling arm at the centre of the view'], ['Reel in · Pay out', 'Appear while the cable is attached'],
+  ['Crouch', 'Crouch · drop from a wall'], ['Observe (hold)', 'Zoom in and study a creature'], ['Take', 'Appears next to an artifact'],
+  ['Ability · Lamp', 'Artifact ability · explorer\'s lamp'], ['☰ · map · book', 'Pause · map · journal'],
+];
+
 const CONTROLS = [
   ['W A S D', 'Move'], ['Mouse', 'Look'], ['Space', 'Jump · climb a wall when held against it · let go of the cable'], ['Shift', 'Run'], ['Ctrl / C', 'Crouch · drop from a wall'],
   ['Left click', 'Fire / release the grappling arm'], ['Right click / Q / wheel up', 'Reel in the cable'], ['Z / wheel down', 'Pay out the cable'], ['X', 'Release the cable'],
@@ -43,6 +54,9 @@ const CONTROLS = [
   ['M', 'Map'], ['N', 'Vertical abyss map'], ['J / Tab', 'Creature catalog'], ['I', 'Equipment'], ['Esc / P', 'Pause'],
 ];
 
+function hasSavedSettings() {
+  try { return !!localStorage.getItem(SETTINGS_KEY); } catch { return false; }
+}
 function loadSettings() {
   try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; } catch { return { ...DEFAULT_SETTINGS }; }
 }
@@ -65,7 +79,11 @@ export class App {
   constructor(canvas) {
     this.canvas = canvas;
     this.ui = document.getElementById('ui');
+    const fresh = !hasSavedSettings();
     this.settings = loadSettings();
+    this.touch = detectTouch(this.settings);
+    if (this.touch && fresh) Object.assign(this.settings, MOBILE_DEFAULTS);
+    document.body.classList.toggle('touch', this.touch);
     this.audio = new AudioEngine(this.settings);
     this.state = 'title';
     this.game = null;
@@ -73,7 +91,43 @@ export class App {
     this.screen.className = 'screen';
     this.ui.appendChild(this.screen);
     window.addEventListener('keydown', (e) => this.onKey(e));
+    // phones: play in landscape; turning to portrait pauses (the overlay asks to rotate back)
+    const onTurn = () => { this.needsRedraw = true; this.checkOrientation(); };
+    window.addEventListener('resize', onTurn);
+    window.addEventListener('orientationchange', onTurn);
+    if (screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', onTurn);
+    document.addEventListener('gesturestart', (e) => e.preventDefault());
     window.__app = this;
+  }
+
+  isPortrait() { return window.innerHeight > window.innerWidth; }
+
+  checkOrientation() {
+    if (!this.touch) return;
+    if (this.isPortrait() && this.state === 'playing') this.showPause();
+  }
+
+  /** Full screen and landscape lock where the browser allows it (needs a tap). */
+  enterFullscreen() {
+    if (!this.touch) return;
+    const el = document.documentElement;
+    const lock = () => { try { const p = screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); if (p && p.catch) p.catch(() => {}); } catch { /* unsupported */ } };
+    if (!document.fullscreenElement && el.requestFullscreen) {
+      try { el.requestFullscreen({ navigationUI: 'hide' }).then(lock, () => {}); } catch { /* unsupported */ }
+    } else lock();
+  }
+
+  /** Switch touch controls on or off while running. */
+  setTouchMode(on) {
+    this.touch = on;
+    document.body.classList.toggle('touch', on);
+    const g = this.game;
+    if (g && g.player) {
+      g.touch = on;
+      if (g.grapple) g.grapple.setTouchLayout(on);
+      if (on && !this.touchUI) this.touchUI = new TouchControls(g, this);
+      if (this.touchUI) this.touchUI.setVisible(on && this.state === 'playing');
+    }
   }
 
   // ------------------------------------------------------------------ screens
@@ -101,9 +155,9 @@ export class App {
       </div>`;
     const seedEl = this.screen.querySelector('#seed');
     this.screen.querySelector('[data-act=dice]').onclick = () => { seedEl.value = randomSeedLabel(); };
-    this.screen.querySelector('[data-act=new]').onclick = () => { const s = seedEl.value.trim() || randomSeedLabel(); this.audio.init(); this.startGame({ seedLabel: s }); };
+    this.screen.querySelector('[data-act=new]').onclick = () => { const s = seedEl.value.trim() || randomSeedLabel(); this.enterFullscreen(); this.audio.init(); this.startGame({ seedLabel: s }); };
     const cont = this.screen.querySelector('[data-act=continue]');
-    if (cont) cont.onclick = async () => { this.audio.init(); const save = await SaveStore.load(latest.id); if (save) this.startGame({ save }); else this.toast('That save could not be read.'); };
+    if (cont) cont.onclick = async () => { this.enterFullscreen(); this.audio.init(); const save = await SaveStore.load(latest.id); if (save) this.startGame({ save }); else this.toast('That save could not be read.'); };
     this.screen.querySelector('[data-act=load]').onclick = () => this.showLoad('title');
     this.screen.querySelector('[data-act=settings]').onclick = () => this.showSettings('title');
     this.screen.querySelector('[data-act=controls]').onclick = () => this.showControls('title');
@@ -175,6 +229,11 @@ export class App {
         <h3>Controls</h3>
         ${slider('sensitivity', 'Mouse sensitivity', 0.2, 3, 0.05, (v) => Number(v).toFixed(2))}
         ${check('invertY', 'Invert vertical look')}
+        <h3>Touch</h3>
+        <div class="set-row"><label>Touch controls</label><select data-key="touchControls">${[['auto', 'Automatic'], ['on', 'On'], ['off', 'Off']].map(([v, l]) => `<option value="${v}" ${s.touchControls === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span class="val"></span></div>
+        ${slider('touchLook', 'Touch look speed', 0.4, 3, 0.05, (v) => Number(v).toFixed(2))}
+        ${slider('touchSize', 'Button size', 0.7, 1.5, 0.05, (v) => `${Math.round(v * 100)}%`)}
+        ${slider('touchOpacity', 'Button opacity', 0.3, 1, 0.05, (v) => `${Math.round(v * 100)}%`)}
         <h3>Audio</h3>
         ${slider('volMaster', 'Master volume', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`)}
         ${slider('volMusic', 'Music', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`)}
@@ -191,10 +250,13 @@ export class App {
         s[key] = el.type === 'checkbox' ? el.checked : Number(el.value);
         if (valEl) {
           const v = s[key];
-          valEl.textContent = key === 'viewDistance' || key === 'particles' || key.startsWith('vol') ? `${Math.round(v * 100)}%` : key === 'fov' ? `${v}°` : key === 'pixelRatio' ? `${v}×` : Number(v).toFixed(2);
+          valEl.textContent = key === 'viewDistance' || key === 'particles' || key.startsWith('vol') || key === 'touchSize' || key === 'touchOpacity' ? `${Math.round(v * 100)}%` : key === 'fov' ? `${v}°` : key === 'pixelRatio' ? `${v}×` : Number(v).toFixed(2);
         }
         this.applySettings(key);
       };
+    });
+    this.screen.querySelectorAll('select[data-key]').forEach((el) => {
+      el.onchange = () => { s[el.dataset.key] = el.value; this.applySettings(el.dataset.key); };
     });
     this.screen.querySelector('[data-act=defaults]').onclick = () => { Object.assign(s, DEFAULT_SETTINGS); for (const k of Object.keys(s)) this.applySettings(k); this.showSettings(back); };
     this.screen.querySelector('[data-act=back]').onclick = () => { saveSettings(s); back === 'pause' ? this.showPause() : this.showTitle(); };
@@ -204,6 +266,8 @@ export class App {
     saveSettings(this.settings);
     const g = this.game;
     if (key.startsWith('vol')) this.audio.applyVolumes();
+    if (key === 'touchControls') this.setTouchMode(detectTouch(this.settings));
+    if ((key === 'touchSize' || key === 'touchOpacity') && this.touchUI) this.touchUI.applySize();
     if (!g || !g.renderer) return;
     if (key === 'viewDistance') g.chunks.setQuality(this.settings.viewDistance);
     if (key === 'shadows') g.renderer.setShadows(this.settings.shadows);
@@ -216,8 +280,9 @@ export class App {
       ${back === 'title' ? '<div class="title-bg"></div>' : ''}
       <div class="panel">
         <h2>Controls</h2>
+        ${this.touch ? `<h3>Touch</h3><table class="controls">${TOUCH_CONTROLS.map(([k, v]) => `<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(v)}</td></tr>`).join('')}</table><h3>Keyboard &amp; mouse</h3>` : ''}
         <table class="controls">${CONTROLS.map(([k, v]) => `<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(v)}</td></tr>`).join('')}</table>
-        <p class="muted">Climb rock by holding <kbd>Space</kbd> while walking into a wall; stamina drains while climbing. Ledges within reach are mantled automatically. Running into water lets you swim; rivers carry you with their current.</p>
+        <p class="muted">Climb rock by ${this.touch ? 'holding Jump' : 'holding <kbd>Space</kbd>'} while walking into a wall; stamina drains while climbing. Ledges within reach are mantled automatically. Running into water lets you swim; rivers carry you with their current.</p>
         <div class="row"><button class="btn primary" data-act="back">Back</button></div>
       </div>`;
     this.screen.querySelector('[data-act=back]').onclick = () => (back === 'pause' ? this.showPause() : this.showTitle());
@@ -270,6 +335,7 @@ export class App {
   }
 
   showClickToPlay(text = 'Click to continue the descent') {
+    if (this.touch) text = text.replace(/^Click/, 'Tap');
     this.screen.className = 'screen click-screen';
     this.screen.innerHTML = `<div class="click-msg">${esc(text)}</div>`;
     this.screen.onclick = () => { this.screen.onclick = null; this.resume(); };
@@ -293,8 +359,9 @@ export class App {
     if (!g) return;
     const playing = st === 'playing';
     g.uiBlocking = !playing;
-    g.paused = st === 'paused' || st === 'journal';
+    g.paused = st === 'paused' || st === 'journal' || st === 'resume';
     if (this.hud) this.hud.setVisible(st === 'playing' || st === 'resume');
+    if (this.touchUI) this.touchUI.setVisible(this.touch && playing);
     if (this.audio.ready) this.audio.suspend(st === 'paused');
   }
 
@@ -302,7 +369,8 @@ export class App {
     this.hideScreen();
     if (this.journal && this.journal.open) this.journal.close();
     this.setState('playing');
-    this.game.input.lock();
+    if (this.touch) this.enterFullscreen();
+    else this.game.input.lock();
     this.audio.init();
   }
 
@@ -320,7 +388,7 @@ export class App {
     this.journal.open = false;
     this.journal.el.classList.add('hidden');
     if (this.journal.preview) this.journal.preview.detach();
-    if (relock) this.resume();
+    if (relock || this.touch) this.resume();
     else { this.setState('resume'); this.showClickToPlay(); }
   }
 
@@ -355,7 +423,10 @@ export class App {
     const game = this.game = new Game(this.canvas, this.settings, {
       onProgress: (stage, p) => this.setProgress(stage, p),
       onWorldReady: (g) => this.attachSystems(g, save),
-      onPausedFrame: () => {},
+      onPausedFrame: (dt) => {
+        // the world waits for the player, but stays drawn (and is redrawn after a resize)
+        if (this.state === 'resume' || this.needsRedraw) { this.needsRedraw = false; game.renderOnly(dt); }
+      },
     });
     window.__descents = game;
     try {
@@ -378,6 +449,7 @@ export class App {
   /** Create and connect every gameplay system once the world exists. */
   attachSystems(g, save) {
     const plan = g.plan;
+    g.touch = this.touch;
     const p = new Player(g);
     const s = plan.spawn;
     p.spawn(s.x, s.y, s.z, s.yaw);
@@ -404,8 +476,14 @@ export class App {
     this.hud = new HUD(g, this.ui);
     this.hud.setVisible(false);
     this.journal = new Journal(g, this.ui);
-    this.journal.onClose = () => { if (this.state === 'journal') { this.setState('resume'); this.showClickToPlay(); } };
-    g.systems.push({ lateUpdate: (dt) => { this.hud.update(dt); this.audioUpdate(dt); this.adaptQuality(); } });
+    this.journal.onClose = () => {
+      if (this.state !== 'journal') return;
+      if (this.touch) this.resume();
+      else { this.setState('resume'); this.showClickToPlay(); }
+    };
+    g.touch = this.touch;
+    if (this.touch) this.touchUI = new TouchControls(g, this);
+    g.systems.push({ lateUpdate: (dt) => { this.hud.update(dt); if (this.touchUI) this.touchUI.update(); this.audioUpdate(dt); this.adaptQuality(); } });
     this.wireEvents(g);
     this.autosaveTimer = 120;
   }
@@ -485,7 +563,13 @@ export class App {
 
   introHints() {
     const H = this.hud;
-    const seq = [
+    const seq = this.touch ? [
+      [1, 'Drag on the left to move (push fully to run) · drag on the right to look'],
+      [11, 'The Abyss Eye lies at the centre of the world. Head for the gates in the rim wall to start your descent.'],
+      [22, '<b>Arm</b> fires the grappling claw where you aim · <b>Reel in</b> and <b>Pay out</b> appear once it bites'],
+      [34, 'Hold <b>Observe</b> to study creatures · <b>Take</b> appears beside artifacts · hold <b>Jump</b> against rock to climb'],
+      [46, 'The buttons at the top open the map and the journal · ☰ pauses'],
+    ] : [
       [1, '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump'],
       [11, 'The Abyss Eye lies at the centre of the world. Head for the gates in the rim wall to start your descent.'],
       [22, '<kbd>Left click</kbd> fires the grappling arm · <kbd>Right click</kbd> reels in · <kbd>Z</kbd> pays out'],

@@ -189,19 +189,20 @@ export class HUD {
 
   updatePrompt(p) {
     const g = this.game;
+    const t = !!g.touch;
     let txt = '';
     const A = g.artifacts;
     if (A && A.focus && p.mode !== 'dead') {
       const a = A.focus.art;
-      txt = `<kbd>E</kbd> Take the ${esc(a.name)} <span class="muted">(${a.gradeLabel})</span>`;
+      txt = `${t ? '<b>Take</b>' : '<kbd>E</kbd> Take'} the ${esc(a.name)} <span class="muted">(${a.gradeLabel})</span>`;
     } else if (g.discovery.focus && !p.zoomed && p.mode !== 'dead') {
       const a = g.discovery.focus;
       const known = g.discovery.known(a.sp.id);
-      txt = `<kbd>F</kbd> Observe ${known ? esc(a.sp.name) : 'the creature'}`;
+      txt = `${t ? 'Hold <b>Observe</b> to study' : '<kbd>F</kbd> Observe'} ${known ? esc(a.sp.name) : 'the creature'}`;
     } else if (g.grapple && g.grapple.attached) {
-      txt = '<kbd>RMB</kbd>/<kbd>Q</kbd> reel in · <kbd>Z</kbd> pay out · <kbd>Space</kbd> let go';
+      txt = t ? 'Hold <b>Reel in</b> or <b>Pay out</b> · <b>Jump</b> to let go' : '<kbd>RMB</kbd>/<kbd>Q</kbd> reel in · <kbd>Z</kbd> pay out · <kbd>Space</kbd> let go';
     } else if (p.mode === 'climb') {
-      txt = '<kbd>W</kbd>/<kbd>S</kbd> climb · <kbd>Space</kbd> leap off · <kbd>Ctrl</kbd> drop';
+      txt = t ? 'Push up or down to climb · <b>Leap</b> off · <b>Drop</b>' : '<kbd>W</kbd>/<kbd>S</kbd> climb · <kbd>Space</kbd> leap off · <kbd>Ctrl</kbd> drop';
     }
     this.set('.prompt', txt);
   }
@@ -235,7 +236,7 @@ export class HUD {
       const a = A.byId.get(id);
       const cd = A.cooldowns.get(id) || 0;
       const isActive = active && active.id === id;
-      return `<div class="hs ${isActive ? 'active' : ''}" title="${esc(a.name)}"><span class="grade g${a.grade}">${['IV', 'III', 'II', 'I', '✶'][a.grade]}</span>${isActive ? `<kbd>R</kbd>${cd > 0 ? `<b>${Math.ceil(cd)}</b>` : ''}` : ''}</div>`;
+      return `<div class="hs ${isActive ? 'active' : ''}" title="${esc(a.name)}"><span class="grade g${a.grade}">${['IV', 'III', 'II', 'I', '✶'][a.grade]}</span>${isActive ? `${this.game.touch ? '' : '<kbd>R</kbd>'}${cd > 0 ? `<b>${Math.ceil(cd)}</b>` : ''}` : ''}</div>`;
     }).join('');
     this.set('.slots-hud', html);
   }
