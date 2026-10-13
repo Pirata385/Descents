@@ -16,13 +16,15 @@ import { HUD } from './hud.js';
 import { TouchControls, detectTouch } from './touch.js';
 import { Journal } from './journal.js';
 import { LAYERS } from '../world/layers.js';
-import { FAMILY_LABEL } from '../creatures/genetics.js';
+import { FAMILY_LABEL } from '../creatures/genome.js';
+import { GamepadInput, GLYPH } from '../core/gamepad.js';
 
 const SETTINGS_KEY = 'descents.settings.v1';
 const DEFAULT_SETTINGS = {
   viewDistance: 1.0, shadows: true, fov: 75, sensitivity: 1, invertY: false, pixelRatio: 1.5, particles: 1,
   volMaster: 0.8, volMusic: 0.5, volAmbience: 0.7, volEffects: 0.8, showArm: true, showFps: false, autoQuality: true,
   touchControls: 'auto', touchLook: 1, touchSize: 1, touchOpacity: 0.85,
+  padLook: 1, padDeadzone: 0.15, rumble: true,
 };
 // lighter defaults the first time the game runs on a phone or tablet
 const MOBILE_DEFAULTS = { viewDistance: 0.6, pixelRatio: 1, shadows: false, particles: 0.5, antialias: false };
@@ -53,6 +55,22 @@ const CONTROLS = [
   ['E', 'Take an artifact'], ['F (hold)', 'Observe creatures (zoom)'], ['R', 'Use an artifact ability'], ['L', "Explorer's lamp"],
   ['M', 'Map'], ['N', 'Vertical abyss map'], ['J / Tab', 'Creature catalog'], ['I', 'Equipment'], ['Esc / P', 'Pause'],
 ];
+
+// PlayStation 4 controller (DualShock 4); any standard-mapping gamepad uses the same positions
+const PAD_CONTROLS = [
+  [`${GLYPH.lstick} stick`, 'Move · push up or down to climb'], [GLYPH.L3, 'Run (toggle; stopping ends it)'], [`${GLYPH.rstick} stick`, 'Look'],
+  [GLYPH.cross, 'Jump · hold against a wall to climb · let go of the cable'], [GLYPH.circle, 'Crouch · drop from a wall'],
+  [GLYPH.square, 'Take an artifact'], [`${GLYPH.triangle} / ${GLYPH.R3} (hold)`, 'Observe creatures (zoom)'],
+  [GLYPH.R2, 'Fire / release the grappling arm'], [GLYPH.L2, 'Reel in the cable'], [GLYPH.L1, 'Pay out the cable'], [GLYPH.R1, 'Release the cable'],
+  [GLYPH.up, "Explorer's lamp"], [GLYPH.down, 'Use an artifact ability'], [`${GLYPH.left} ${GLYPH.right}`, 'Map · vertical abyss map'],
+  [GLYPH.share, 'Creature catalog'], [GLYPH.touchpad, 'Equipment'], [GLYPH.options, 'Pause'],
+  ['Menus', `D-pad or left stick to choose · ${GLYPH.cross} select · ${GLYPH.circle} back · ${GLYPH.L1} ${GLYPH.R1} journal tabs · right stick scrolls (on the map it pans; ${GLYPH.L2} ${GLYPH.R2} zoom)`],
+];
+
+function padTable(show) {
+  if (!show) return '';
+  return `<h3>PS4 controller</h3><table class="controls">${PAD_CONTROLS.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>`;
+}
 
 function hasSavedSettings() {
   try { return !!localStorage.getItem(SETTINGS_KEY); } catch { return false; }
@@ -90,7 +108,19 @@ export class App {
     this.screen = document.createElement('div');
     this.screen.className = 'screen';
     this.ui.appendChild(this.screen);
-    window.addEventListener('keydown', (e) => this.onKey(e));
+    window.addEventListener('keydown', (e) => { this.setInputDevice(this.touch ? 'touch' : 'kbm'); this.onKey(e); });
+    // whichever device was used last decides the prompts and the touch buttons
+    window.addEventListener('mousedown', () => this.setInputDevice('kbm'));
+    window.addEventListener('mousemove', (e) => {
+      // ignore the jump some browsers report as the pointer locks
+      const m = Math.abs(e.movementX || 0) + Math.abs(e.movementY || 0);
+      if (m > 4 && m < 250 && !(this.game && performance.now() - this.game.input.lockTime < 400)) this.setInputDevice('kbm');
+    });
+    window.addEventListener('touchstart', () => this.setInputDevice('touch'), { passive: true });
+    this.device = this.touch ? 'touch' : 'kbm';
+    this.pad = new GamepadInput(this);
+    // after playing with a controller (no pointer lock), a click takes the mouse back
+    canvas.addEventListener('click', () => { if (this.state === 'playing' && !this.touch && this.game && !this.game.input.locked) this.game.input.lock(); });
     // phones: play in landscape; turning to portrait pauses (the overlay asks to rotate back)
     const onTurn = () => { this.needsRedraw = true; this.checkOrientation(); };
     window.addEventListener('resize', onTurn);
@@ -101,6 +131,27 @@ export class App {
   }
 
   isPortrait() { return window.innerHeight > window.innerWidth; }
+
+  /** 'kbm', 'touch' or 'pad': prompts, glyphs and the touch buttons follow the device in use. */
+  setInputDevice(dev) {
+    if (!dev) dev = this.touch ? 'touch' : 'kbm';
+    if (dev === this.device) return;
+    this.device = dev;
+    if (dev !== 'pad' && this.pad && this.pad.active) { this.pad.active = false; this.pad.clearFocus(); this.pad.releaseGame(); }
+    document.body.classList.toggle('gamepad', dev === 'pad');
+    if (this.game) this.game.pad = dev === 'pad';
+    if (this.touchUI) this.touchUI.setVisible(this.touch && dev !== 'pad' && this.state === 'playing');
+    if (this.state === 'resume') this.showClickToPlay(this.clickText);
+  }
+
+  /** Options on the controller, or the controller was disconnected mid-play. */
+  pauseFromPad() {
+    if (this.state !== 'playing') return;
+    if (document.pointerLockElement) { this.wantUnlock = true; this.game.input.unlock(); }
+    this.showPause();
+  }
+
+  showPauseFromPad() { if (this.device === 'pad') this.pauseFromPad(); }
 
   checkOrientation() {
     if (!this.touch) return;
@@ -229,6 +280,10 @@ export class App {
         <h3>Controls</h3>
         ${slider('sensitivity', 'Mouse sensitivity', 0.2, 3, 0.05, (v) => Number(v).toFixed(2))}
         ${check('invertY', 'Invert vertical look')}
+        <h3>Controller</h3>
+        ${slider('padLook', 'Stick look speed', 0.3, 3, 0.05, (v) => Number(v).toFixed(2))}
+        ${slider('padDeadzone', 'Stick dead zone', 0.05, 0.35, 0.01, (v) => Number(v).toFixed(2))}
+        ${check('rumble', 'Vibration')}
         <h3>Touch</h3>
         <div class="set-row"><label>Touch controls</label><select data-key="touchControls">${[['auto', 'Automatic'], ['on', 'On'], ['off', 'Off']].map(([v, l]) => `<option value="${v}" ${s.touchControls === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span class="val"></span></div>
         ${slider('touchLook', 'Touch look speed', 0.4, 3, 0.05, (v) => Number(v).toFixed(2))}
@@ -280,8 +335,11 @@ export class App {
       ${back === 'title' ? '<div class="title-bg"></div>' : ''}
       <div class="panel">
         <h2>Controls</h2>
-        ${this.touch ? `<h3>Touch</h3><table class="controls">${TOUCH_CONTROLS.map(([k, v]) => `<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(v)}</td></tr>`).join('')}</table><h3>Keyboard &amp; mouse</h3>` : ''}
+        ${this.touch ? `<h3>Touch</h3><table class="controls">${TOUCH_CONTROLS.map(([k, v]) => `<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(v)}</td></tr>`).join('')}</table>` : ''}
+        ${padTable(this.device === 'pad')}
+        <h3>Keyboard &amp; mouse</h3>
         <table class="controls">${CONTROLS.map(([k, v]) => `<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(v)}</td></tr>`).join('')}</table>
+        ${padTable(this.device !== 'pad')}
         <p class="muted">Climb rock by ${this.touch ? 'holding Jump' : 'holding <kbd>Space</kbd>'} while walking into a wall; stamina drains while climbing. Ledges within reach are mantled automatically. Running into water lets you swim; rivers carry you with their current.</p>
         <div class="row"><button class="btn primary" data-act="back">Back</button></div>
       </div>`;
@@ -335,7 +393,9 @@ export class App {
   }
 
   showClickToPlay(text = 'Click to continue the descent') {
-    if (this.touch) text = text.replace(/^Click/, 'Tap');
+    this.clickText = text;
+    if (this.device === 'pad') text = text.replace(/^Click/, 'Press ✕');
+    else if (this.touch) text = text.replace(/^Click/, 'Tap');
     this.screen.className = 'screen click-screen';
     this.screen.innerHTML = `<div class="click-msg">${esc(text)}</div>`;
     this.screen.onclick = () => { this.screen.onclick = null; this.resume(); };
@@ -361,7 +421,7 @@ export class App {
     g.uiBlocking = !playing;
     g.paused = st === 'paused' || st === 'journal' || st === 'resume';
     if (this.hud) this.hud.setVisible(st === 'playing' || st === 'resume');
-    if (this.touchUI) this.touchUI.setVisible(this.touch && playing);
+    if (this.touchUI) this.touchUI.setVisible(this.touch && playing && this.device !== 'pad');
     if (this.audio.ready) this.audio.suspend(st === 'paused');
   }
 
@@ -376,8 +436,7 @@ export class App {
 
   openJournal(tab) {
     if (!this.game || !this.game.player) return;
-    this.wantUnlock = true;
-    this.game.input.unlock();
+    if (document.pointerLockElement) { this.wantUnlock = true; this.game.input.unlock(); }
     this.hideScreen();
     this.setState('journal');
     this.journal.show(tab);
@@ -399,7 +458,7 @@ export class App {
     const tabFor = { KeyM: 'map', KeyN: 'abyss', KeyJ: 'creatures', Tab: 'creatures', KeyI: 'equipment' }[code];
     if (this.state === 'playing') {
       if (tabFor) { e.preventDefault(); this.openJournal(tabFor); return; }
-      if (code === 'Escape' || code === 'KeyP') { this.wantUnlock = true; this.game.input.unlock(); this.showPause(); }
+      if (code === 'Escape' || code === 'KeyP') { if (document.pointerLockElement) { this.wantUnlock = true; this.game.input.unlock(); } this.showPause(); }
     } else if (this.state === 'journal') {
       if (code === 'Escape') { this.closeJournal(false); return; }
       if (tabFor) {
@@ -450,6 +509,7 @@ export class App {
   attachSystems(g, save) {
     const plan = g.plan;
     g.touch = this.touch;
+    g.pad = this.device === 'pad';
     const p = new Player(g);
     const s = plan.spawn;
     p.spawn(s.x, s.y, s.z, s.yaw);
@@ -491,16 +551,17 @@ export class App {
   wireEvents(g) {
     const A = this.audio, H = this.hud, p = g.player, gr = g.grapple;
     p.on('step', (kind, speed, wet) => A.footstep(kind, speed, wet));
-    p.on('land', (impact, kind) => A.land(impact, kind));
+    const R = this.pad;
+    p.on('land', (impact, kind) => { A.land(impact, kind); if (impact > 6) R.rumble(120, Math.min(1, impact / 18), 0.3); });
     p.on('jump', () => A.play('jump'));
-    p.on('hurt', (amt) => { A.play('hurt'); H.flashHurt(amt); });
-    p.on('death', () => A.play('death'));
+    p.on('hurt', (amt) => { A.play('hurt'); H.flashHurt(amt); R.rumble(220, 0.4 + Math.min(0.6, amt / 40), 0.6); });
+    p.on('death', () => { A.play('death'); R.rumble(700, 1, 0.8); });
     p.on('respawn', () => A.play('respawn'));
     p.on('splash', () => A.play('splash'));
     p.on('mantle', () => A.play('mantle'));
     p.on('grab', () => A.play('grab'));
-    gr.on('fire', () => A.play('grapple-fire'));
-    gr.on('attach', () => A.play('grapple-attach', gr.anchor));
+    gr.on('fire', () => { A.play('grapple-fire'); R.rumble(60, 0, 0.45); });
+    gr.on('attach', () => { A.play('grapple-attach', gr.anchor); R.rumble(90, 0.15, 0.7); });
     gr.on('miss', () => A.play('grapple-miss'));
     gr.on('release', () => A.play('grapple-release'));
     gr.on('stowed', () => A.play('grapple-stow'));
@@ -563,7 +624,14 @@ export class App {
 
   introHints() {
     const H = this.hud;
-    const seq = this.touch ? [
+    const G = GLYPH;
+    const seq = this.device === 'pad' ? [
+      [1, `Left stick moves (${G.L3} to run) · right stick looks · ${G.cross} jump`],
+      [11, 'The Abyss Eye lies at the centre of the world. Head for the gates in the rim wall to start your descent.'],
+      [22, `${G.R2} fires the grappling arm · ${G.L2} reels in · ${G.L1} pays out · ${G.R1} lets go`],
+      [34, `Hold ${G.triangle} to observe creatures · ${G.square} takes artifacts · ${G.up} lamp`],
+      [46, `${G.left} map · ${G.right} vertical abyss map · ${G.share} catalog · ${G.touchpad} equipment`],
+    ] : this.touch ? [
       [1, 'Drag on the left to move (push fully to run) · drag on the right to look'],
       [11, 'The Abyss Eye lies at the centre of the world. Head for the gates in the rim wall to start your descent.'],
       [22, '<b>Arm</b> fires the grappling claw where you aim · <b>Reel in</b> and <b>Pay out</b> appear once it bites'],
@@ -594,11 +662,7 @@ export class App {
       this.restlessT = (this.restlessT || 0) - dt;
       if (this.restlessT <= 0) {
         this.restlessT = 6;
-        for (const a of g.ecosystem.agentsNear(p.pos, 35)) {
-          if (a.sp.behavior.diet === 'carnivore' || a.airborne || a.state === 'flee' || a.state === 'hunt') continue;
-          a.state = 'wander'; a.target = { pos: p.pos.clone().add({ x: Math.random() * 4 - 2, y: 0, z: Math.random() * 4 - 2 }) }; a.timer = 6;
-          break;
-        }
+        g.ecosystem.attract(p.pos, 6);
       }
     }
     // autosave

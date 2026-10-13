@@ -19,7 +19,7 @@ import { box, flat, building, resetPrimOrder } from './structures.js';
 import { STYLES, astar, trailCost, smoothPath, profileRoute, makeRoute, validatePath, densify, routeTo3, RouteIndex } from './routes.js';
 import { SpatialGrid } from './spatial.js';
 import { LAYER_BOUNDARIES } from './layers.js';
-import { generateSpecies } from '../creatures/genetics.js';
+import { generateSpecies } from '../creatures/genome.js';
 import { generateArtifacts } from '../artifacts/artifactGen.js';
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());

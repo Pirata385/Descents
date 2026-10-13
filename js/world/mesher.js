@@ -13,6 +13,11 @@ import { Z_EYE, Z_BOWL, Z_CITY, Z_COUNTRY, Z_SEA } from './field.js';
 import { LAYER_BOUNDARIES } from './layers.js';
 import { SpatialGrid } from './spatial.js';
 
+// Layer 3 rock colours by depth: ember basalt, rust strata, pale abyssal limestone
+const L3_EMBER = [0.2, 0.165, 0.16];
+const L3_RUST = [0.37, 0.25, 0.19];
+const L3_DEEP = [0.4, 0.43, 0.46];
+
 export const CHUNK = 32;
 const MARGIN = 1;
 
@@ -126,7 +131,9 @@ export class ChunkMesher {
     if (y > -60) base = pal[M.ROCK];
     else if (y > LAYER_BOUNDARIES.layer2Top) base = mixRGB(pal[M.ROCK], pal[M.SHAFTROCK], smoothstep(-60, LAYER_BOUNDARIES.layer2Top, y));
     else if (y > -870) base = mixRGB(pal[M.SHAFTROCK], pal[M.DARKROCK], smoothstep(-350, -700, y) * 0.6);
-    else base = mixRGB(pal[M.SHAFTROCK], pal[M.BASALT], smoothstep(-870, -940, y));
+    else if (y > -1200) base = mixRGB(pal[M.SHAFTROCK], L3_EMBER, smoothstep(-870, -960, y));
+    else if (y > -1600) base = mixRGB(L3_EMBER, L3_RUST, smoothstep(-1200, -1300, y));
+    else base = mixRGB(L3_RUST, L3_DEEP, smoothstep(-1600, -1720, y));
     const l = 0.97 + (h - 0.5) * 0.06;
     out[0] = base[0] * l; out[1] = base[1] * l; out[2] = base[2] * l;
     return out;
@@ -136,7 +143,7 @@ export class ChunkMesher {
     const pal = this.pal;
     let m = mat;
     if (steep >= 2 && isGrassy(m) && m !== M.FIELD) m = steep >= 4 ? M.ROCK : M.DIRT;
-    if (MATERIALS[m] && MATERIALS[m].natural && (m === M.ROCK || m === M.SHAFTROCK || m === M.DARKROCK)) {
+    if (MATERIALS[m] && MATERIALS[m].natural && (m === M.ROCK || m === M.SHAFTROCK || m === M.DARKROCK || m === M.FAULTROCK)) {
       this.rockColor(y, h, out);
       out[0] *= 1.08; out[1] *= 1.08; out[2] *= 1.08;
       return m;
@@ -306,6 +313,7 @@ export class ChunkMesher {
       if (grassy && y > top - 1.6) { const g = pal[M.DIRT]; out[0] = g[0]; out[1] = g[1]; out[2] = g[2]; return; }
       if (mat === M.STONEPLAIN) { const g = pal[M.STONEPLAIN]; out[0] = g[0] * 0.85; out[1] = g[1] * 0.85; out[2] = g[2] * 0.85; return; }
       if (mat === M.BASALT) { const g = pal[M.BASALT]; out[0] = g[0]; out[1] = g[1]; out[2] = g[2]; return; }
+      if (mat === M.DEEPSTONE) { const g = pal[M.DEEPSTONE]; out[0] = g[0] * 0.9; out[1] = g[1] * 0.9; out[2] = g[2] * 0.9; return; }
       this.rockColor(y, h, out);
       return;
     }
@@ -487,7 +495,22 @@ export class ChunkMesher {
               xf.set(c.x + ox, top, c.z + oz, yaw, 0.8, 0.6, 0.8);
               emitTemplate(buf, F.grass[Math.floor(r2 * F.grass.length)], xf, [0.9, 0.95, 0.8], ex, 1, 1);
             }
-          } else if (mat === M.CRYSTAL || mat === M.FUNGUS) {
+          } else if (mat === M.LICHEN || mat === M.FAULTROCK || mat === M.DEEPSTONE || mat === M.FUNGUS) {
+            // Layer 3 floors: glowing caps and stalagmite stubs in the caves, scree on the ledges
+            const cave = (c.flags & CF.CAVE) !== 0;
+            if (r1 < (mat === M.LICHEN || mat === M.FUNGUS ? 0.09 : 0.025) * (lod1 ? 0.4 : 1)) {
+              xf.set(c.x + ox, top, c.z + oz, yaw, 1, 1, 1);
+              emitTemplate(buf, F.glowMush[Math.floor(r2 * F.glowMush.length)], xf, [1, 1, 1], Math.max(0.25, ex), 1, 1);
+            } else if (r1 < 0.12 && cave && !lod1) {
+              const s = 0.5 + r2 * 1.2;
+              xf.set(c.x + ox, top - 0.2, c.z + oz, yaw, s * 0.7, s * (1.4 + r3 * 1.6), s * 0.7);
+              emitTemplate(buf, F.rocks[Math.floor(r3 * F.rocks.length)], xf, mat === M.DEEPSTONE ? [1.1, 1.15, 1.2] : [0.9, 0.82, 0.78], ex, 1, 0);
+            } else if (r1 < 0.15) {
+              const s = 0.35 + r2 * 0.8;
+              xf.set(c.x + ox, top - 0.15, c.z + oz, yaw, s, s * 0.7, s);
+              emitTemplate(buf, F.rocks[Math.floor(r3 * F.rocks.length)], xf, [0.85, 0.8, 0.78], ex, 1, 0);
+            }
+          } else if (mat === M.CRYSTAL) {
             // nothing extra
           }
         }

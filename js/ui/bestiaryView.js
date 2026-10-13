@@ -1,68 +1,81 @@
-// Debug view that lays out every generated species (adult and juvenile) for
-// visual inspection of the genome system: ?bestiary=1&seed=...
+// Debug view of the genome system: for every species, two parents and four of
+// their offspring, animated, so anatomical variation and inheritance can be
+// inspected. ?bestiary=1&seed=...&layer=layer3&pose=walk|idle|fly
 import * as THREE from 'three';
-import { generateSpecies } from '../creatures/genetics.js';
-import { buildSpeciesModel, createCreatureObject } from '../creatures/creatureMesh.js';
-import { animateCreature } from '../creatures/animation.js';
-import { individualGenes, inheritGenes } from '../creatures/genetics.js';
+import { generateSpecies, individualGenes, inheritGenes } from '../creatures/genome.js';
+import { phenotype } from '../creatures/anatomy.js';
+import { buildCreature } from '../creatures/bodyMesh.js';
+import { Animator } from '../creatures/motion.js';
 import { NameGen } from '../world/names.js';
 import { normalizeSeed, RNG } from '../core/rng.js';
 
 export function bestiary(canvas, seedText) {
+  const params = new URLSearchParams(location.search);
   const seed = normalizeSeed(seedText);
-  const species = generateSpecies(seed, new NameGen(seed));
+  const layer = params.get('layer');
+  const pose = params.get('pose') || 'walk';
+  let species = generateSpecies(seed, new NameGen(seed));
+  if (layer) species = species.filter((s) => s.layer === layer);
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x8fa6b8);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x556655, 2.2));
-  const sun = new THREE.DirectionalLight(0xffffff, 2.5);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x556655, 2.0));
+  const sun = new THREE.DirectionalLight(0xffffff, 2.4);
   sun.position.set(3, 6, 4);
   scene.add(sun);
-  const cols = 6;
   const items = [];
   const labels = document.createElement('div');
-  labels.style.cssText = 'position:fixed;inset:0;pointer-events:none;font:11px sans-serif;color:#000';
+  labels.style.cssText = 'position:fixed;inset:0;pointer-events:none;font:11px sans-serif;color:#102';
   document.body.appendChild(labels);
+  const perRow = 6;
   species.forEach((sp, i) => {
-    const tpl = buildSpeciesModel(sp);
-    const rng = new RNG(i + 1);
-    const g1 = individualGenes(sp, rng), g2 = individualGenes(sp, rng);
-    const parent = createCreatureObject(tpl, sp, g1);
-    const child = createCreatureObject(tpl, sp, inheritGenes(sp, g1, g2, rng));
-    const x = (i % cols) * 3.6 - (cols - 1) * 1.8, z = Math.floor(i / cols) * 3.4;
-    const s = 1.6 / Math.max(0.6, sp.morph.size) * Math.min(1.6, Math.max(0.6, sp.morph.size));
-    parent.mesh.scale.setScalar(1.25);
-    parent.mesh.position.set(x, 0, -z);
-    parent.mesh.rotation.y = Math.PI / 2 + 0.6;
-    child.mesh.scale.setScalar(0.6);
-    child.mesh.position.set(x + 1.0, 0, -z + 0.9);
-    child.mesh.rotation.y = Math.PI / 2 + 0.9;
-    scene.add(parent.mesh, child.mesh);
-    const ap = { sp, obj: parent, scale: 1, state: sp.behavior.locomotion === 'fly' ? 'wander' : 'wander', animSpeed: sp.behavior.speed.walk * 0.6, seed: i, airborne: sp.behavior.locomotion === 'fly', look: 0, calling: 0 };
-    const ac = { sp, obj: child, scale: 0.6, state: 'idle', animSpeed: 0, seed: i + 0.5, juvenile: true, look: 0, calling: 0 };
-    items.push([ap, tpl], [ac, tpl]);
+    const rng = new RNG(i * 7 + 1);
+    const sub = i % sp.subspecies.length;
+    const A = individualGenes(sp, rng, sub), B = individualGenes(sp, rng, sub);
+    const kids = [0, 1, 2, 3].map(() => inheritGenes(sp, A, B, rng));
+    const row = i;
+    [A, B, ...kids].forEach((g, j) => {
+      const ph = phenotype(sp, g);
+      const cr = buildCreature(ph, i * 10 + j);
+      const k = 1 / Math.max(0.05, ph.scale);
+      const root = new THREE.Group();
+      root.add(cr.mesh);
+      root.scale.setScalar(k * (j < 2 ? 1 : 0.85));
+      const x = j * 2.2 - (perRow - 1) * 1.1 + (j >= 2 ? 0.6 : 0);
+      const z = -row * 2.3;
+      root.position.set(x, 0, z);
+      root.rotation.y = Math.PI / 2 + 0.5;
+      scene.add(root);
+      const flier = ph.wings.type === 'feather' || ph.wings.type === 'membrane';
+      const anim = new Animator(cr, ph, sp, i * 10 + j);
+      const mode = pose === 'fly' && flier ? 'fly' : pose === 'idle' ? 'ground' : 'ground';
+      items.push({ anim, ph, mode, root, flier, j });
+    });
     const lab = document.createElement('div');
     lab.style.position = 'absolute';
-    lab.dataset.x = x; lab.dataset.z = -z;
-    lab.textContent = `${sp.name} [${sp.family}/${sp.role}] ${sp.morph.size.toFixed(1)}m ${sp.behavior.locomotion}`;
+    lab.dataset.x = -(perRow - 1) * 1.1 - 1.4; lab.dataset.z = -row * 2.3;
+    lab.innerHTML = `<b>${sp.name}</b><br>${sp.layer} · ${sp.niche} · ${sp.plan}/${sp.family} · ${sp.size.toFixed(2)} m`;
     labels.appendChild(lab);
-    void s;
   });
-  const rows = Math.ceil(species.length / cols);
-  const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 200);
-  camera.position.set(0, 9 + rows * 1.6, 6);
-  camera.lookAt(0, 0, -rows * 1.6 + 1);
+  const rows = species.length;
+  const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.1, 300);
+  camera.position.set(0, 4 + rows * 1.1, 5);
+  camera.lookAt(0, 0, -rows * 1.15 + 1.5);
   let t = 0;
   const loop = () => {
     t += 1 / 60;
-    for (const [a, tpl] of items) animateCreature(a, tpl, 1 / 60, t);
+    for (const it of items) {
+      const st = { speed: pose === 'walk' ? it.ph.stats.walk : 0, mode: it.mode, action: pose === 'idle' ? (Math.sin(t * 0.5 + it.j) > 0.5 ? 'eat' : 'idle') : 'idle', lookYaw: Math.sin(t * 0.7 + it.j) * 0.6 };
+      it.anim.update(1 / 60, st);
+    }
     renderer.render(scene, camera);
     for (const lab of labels.children) {
-      const v = new THREE.Vector3(Number(lab.dataset.x), -0.1, Number(lab.dataset.z)).project(camera);
-      lab.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth - 60}px`;
-      lab.style.top = `${(-v.y * 0.5 + 0.5) * window.innerHeight + 4}px`;
+      const v = new THREE.Vector3(Number(lab.dataset.x), 0, Number(lab.dataset.z)).project(camera);
+      lab.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth - 150}px`;
+      lab.style.top = `${(-v.y * 0.5 + 0.5) * window.innerHeight - 10}px`;
     }
     requestAnimationFrame(loop);
   };

@@ -1,11 +1,10 @@
 // Small turntable renderer for catalog entries (creatures and artifacts).
 // One WebGL context is shared by every preview and moved between panels.
 import * as THREE from 'three';
-import { createCreatureObject, buildSpeciesModel } from '../creatures/creatureMesh.js';
-import { animateCreature } from '../creatures/animation.js';
+import { buildCreature } from '../creatures/bodyMesh.js';
+import { Animator } from '../creatures/motion.js';
+import { typicalPhenotype } from '../creatures/anatomy.js';
 import { buildArtifactModel } from '../artifacts/artifactMesh.js';
-import { RNG } from '../core/rng.js';
-import { individualGenes } from '../creatures/genetics.js';
 
 export class Preview {
   constructor() {
@@ -26,7 +25,6 @@ export class Preview {
     this.camera = new THREE.PerspectiveCamera(32, 1, 0.01, 100);
     this.pivot = new THREE.Group();
     this.scene.add(this.pivot);
-    this.templates = new Map();
     this.obj = null;
     this.t = 0;
     this.running = false;
@@ -54,7 +52,8 @@ export class Preview {
   clear() {
     if (this.obj) {
       this.pivot.remove(this.obj.root);
-      this.obj.root.traverse((m) => { if (m.material && m.material.dispose) m.material.dispose(); if (m.geometry && this.obj.ownGeometry) m.geometry.dispose(); });
+      if (this.obj.kind === 'creature') { this.obj.mesh.geometry.dispose(); this.obj.mesh.skeleton.dispose(); }
+      else this.obj.root.traverse((m) => { if (m.material && m.material.dispose) m.material.dispose(); if (m.geometry && this.obj.ownGeometry) m.geometry.dispose(); });
       this.obj = null;
     }
   }
@@ -65,27 +64,25 @@ export class Preview {
     this.camera.lookAt(0, height, 0);
   }
 
-  showSpecies(sp, ecoTemplates) {
+  /** A typical individual of the species (nominate form), standing and breathing. */
+  showSpecies(sp, sub = 0) {
     this.clear();
-    let tpl = ecoTemplates && ecoTemplates.get(sp.id);
-    if (!tpl) { tpl = this.templates.get(sp.id); if (!tpl) { tpl = buildSpeciesModel(sp); this.templates.set(sp.id, tpl); } }
-    const genes = individualGenes(sp, new RNG(sp.id * 31 + 7));
-    genes.hue = 0; genes.light = 0; genes.sat = 0;
-    const o = createCreatureObject(tpl, sp, genes);
-    // frame the bind-pose bounds: feet on the ground, centred, about one unit tall/long
-    const g = tpl.geometry;
+    const ph = typicalPhenotype(sp, sub);
+    const cr = buildCreature(ph, sp.id * 31 + 7);
+    const g = cr.mesh.geometry;
     if (!g.boundingBox) g.computeBoundingBox();
     const box = g.boundingBox, size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
-    const k = 1.15 / Math.max(size.x, size.y, size.z, 0.2);
-    o.mesh.scale.setScalar(k);
-    o.mesh.position.set(-c.x * k, -box.min.y * k, -c.z * k);
+    const k = 1.15 / Math.max(size.x, size.y, size.z, 0.05);
     const root = new THREE.Group();
-    root.add(o.mesh);
-    const frameH = size.y * k * 0.5;
+    const inner = new THREE.Group();
+    inner.add(cr.mesh);
+    inner.scale.setScalar(k);
+    inner.position.set(-c.x * k, -box.min.y * k, -c.z * k);
+    root.add(inner);
     this.pivot.add(root);
-    const ind = { sp, obj: o, scale: k, state: 'idle', animSpeed: 0, seed: sp.id, airborne: false, look: 0, calling: 0, perched: true };
-    this.obj = { root, ind, tpl, kind: 'creature' };
-    this.frame(0.62, frameH);
+    const anim = new Animator(cr, ph, sp, sp.id);
+    this.obj = { root, mesh: cr.mesh, anim, ph, kind: 'creature' };
+    this.frame(0.62, size.y * k * 0.5);
   }
 
   showArtifact(art) {
@@ -111,9 +108,8 @@ export class Preview {
     this.t += dt;
     if (!this.drag) this.pivot.rotation.y += dt * this.spin;
     if (this.obj && this.obj.kind === 'creature') {
-      const ind = this.obj.ind;
-      ind.calling = Math.sin(this.t * 0.7) > 0.97 ? 0.5 : 0;
-      animateCreature(ind, this.obj.tpl, dt, this.t);
+      const call = Math.sin(this.t * 0.7) > 0.97;
+      this.obj.anim.update(dt, { speed: 0, mode: 'ground', action: call ? 'call' : Math.sin(this.t * 0.31) > 0.6 ? 'alert' : 'idle', lookYaw: Math.sin(this.t * 0.5) * 0.5 });
     }
     this.renderer.render(this.scene, this.camera);
   }

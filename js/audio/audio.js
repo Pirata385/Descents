@@ -193,11 +193,12 @@ export class AudioEngine {
   creatureCall(sp, pos, kind = 'idle', scale = 1) {
     if (!this.ready) return;
     const c = sp.call, t = this.ctx.currentTime + 0.02;
-    const out = this.out(pos, this.sfx, 3 + sp.morph.size * 4);
+    const size = sp.size ?? 1;
+    const out = this.out(pos, this.sfx, 3 + size * 4);
     const p = c.pitch * (kind === 'alarm' ? 1.25 : kind === 'threat' || kind === 'hunt' ? 0.8 : 1) / Math.sqrt(Math.max(0.5, scale));
     const n = kind === 'alarm' ? Math.min(6, c.rhythm + 2) : c.rhythm;
     const L = c.length * (kind === 'threat' ? 1.4 : 1);
-    const vol = clamp(0.1 + sp.morph.size * 0.08, 0.08, 0.45);
+    const vol = clamp(0.1 + size * 0.08, 0.08, 0.45);
     const gap = Math.max(0.08, L * 0.7);
     switch (c.type) {
       case 'growl':
@@ -250,6 +251,17 @@ export class AudioEngine {
       case 'rumble':
         this.tone(out, t, { freq: 46, a: 0.2, s: L * 1.5, d: 0.6, gain: vol * 1.1 });
         this.noise(out, t, { buf: this.brown, type: 'lowpass', freq: 140, a: 0.2, s: L * 1.5, d: 0.6, gain: vol });
+        break;
+      case 'squeak':
+        // tiny, high and quick (bats and shrews)
+        for (let i = 0; i < n; i++) this.tone(out, t + i * 0.07, { freq: Math.min(6000, p * 2.2), a: 0.003, d: 0.035, gain: vol * 0.35, glide: Math.min(7000, p * 2.8), glideT: 0.03 });
+        break;
+      case 'chitter':
+        for (let i = 0; i < n * 2 + 2; i++) this.tone(out, t + i * 0.045 + Math.random() * 0.01, { freq: p * (1.4 + Math.random() * 0.3), type: 'square', a: 0.002, d: 0.025, gain: vol * 0.25, lp: 4000 });
+        break;
+      case 'scream':
+        this.tone(out, t, { freq: p * 1.1, type: 'sawtooth', a: 0.02, s: L * 0.6, d: 0.25, gain: vol * 0.4, lp: 3200, vib: 0.06, vibRate: 11, glide: p * 0.8 });
+        this.noise(out, t, { freq: p * 2, Q: 2, a: 0.02, s: L * 0.5, d: 0.2, gain: vol * 0.25 });
         break;
       case 'chime':
         for (let i = 0; i < n; i++) for (const [m, gg] of [[1, 1], [2.76, 0.5], [5.4, 0.25]]) this.tone(out, t + i * 0.28, { freq: p * m, a: 0.003, d: 1.4, gain: vol * 0.3 * gg });
@@ -322,6 +334,7 @@ export class AudioEngine {
       case 'ability': this.tone(o, t, { freq: 300, a: 0.05, d: 0.8, gain: 0.15, glide: 1200 }); this.noise(o, t, { type: 'highpass', freq: 2000, a: 0.05, d: 0.6, gain: 0.08 }); break;
       case 'lamp': this.tone(this.uiBus, t, { freq: 1400, type: 'square', d: 0.03, gain: 0.03, lp: 3000 }); break;
       case 'click': this.tone(this.uiBus, t, { freq: 900, type: 'triangle', d: 0.05, gain: 0.05 }); break;
+      case 'tick': this.tone(this.uiBus, t, { freq: 1500, type: 'triangle', d: 0.025, gain: 0.025 }); break;
       case 'open': this.noise(this.uiBus, t, { freq: 1800, Q: 0.5, a: 0.02, d: 0.25, gain: 0.05, sweep: 600 }); break;
       default: break;
     }
