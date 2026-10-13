@@ -12,7 +12,8 @@ import { clamp, lerp } from '../core/mathutil.js';
 const PARCH = [0.86, 0.8, 0.66];
 const ICONS = {
   eye: '◎', waterfall: '≋', lake: '◌', gate: '⛩', guild: '⚑', market: '⌂', temple: '⛫', observatory: '✧', hamlet: '⌂', platform: '▿',
-  ruin: '♜', arch: '∩', spire: '▲', station: '⚑', gallery: '♣', plain: '◇', stair: '≡', fault: '✕', threshold: '∏', cave: '●', crystal: '✦',
+  ruin: '♜', arch: '∩', spire: '▲', station: '⚑', gallery: '♣', plain: '◇', stair: '≡', fault: '✕', cave: '●', crystal: '✦',
+  sinkhole: '◉', hall: '⌓', window: '◫', rookery: '⋔', basin: '◒', fourthgate: '∏',
 };
 
 /** Draw a label unless it would overlap one already placed (nudges it first). */
@@ -146,7 +147,8 @@ export class TopDownMap {
       const known = this.data.bands[i].count > 0;
       const btn = document.createElement('button');
       btn.className = 'btn small tab' + (i === this.band ? ' active' : '');
-      btn.textContent = known ? b.name : '???';
+      btn.textContent = known ? b.short : '???';
+      btn.title = known ? b.name : 'Not yet charted';
       btn.disabled = !known;
       btn.onclick = () => { this.band = i; this.buildBandButtons(); this.draw(); };
       box.appendChild(btn);
@@ -289,8 +291,12 @@ export class TopDownMap {
         this.contour(ctx, (th, f) => { const r = f.tab(f.faultTab, th); return [fp.x + Math.cos(th) * r, fp.z + Math.sin(th) * r]; }, 'rgba(170,40,30,0.95)', [5, 3], 'The Great Fault — Third Layer');
       }
     } else {
-      const fp = this.game.plan.params.fault;
-      this.contour(ctx, (th, f) => { const r = f.tab(f.faultTab, th); return [fp.x + Math.cos(th) * r, fp.z + Math.sin(th) * r]; }, 'rgba(200,60,40,0.95)', [5, 3], 'The Great Fault');
+      // the chasm outline at the middle of this band's depth range
+      const B = BANDS[this.band];
+      const ch = this.game.world.gen.chasm;
+      const ym = Math.max(this.game.plan.params.chasm.floorY + 8, (Math.min(B.top, -900) + Math.max(B.bottom, -1960)) / 2);
+      const [cx, cz] = ch.centreAt(ym);
+      this.contour(ctx, (th) => { const r = ch.wallDist(th, ym); return [cx + Math.cos(th) * r, cz + Math.sin(th) * r]; }, 'rgba(200,60,40,0.95)', [5, 3], this.band === BANDS.length - 1 ? 'The Basin' : 'The Great Fault');
     }
   }
 
@@ -351,7 +357,7 @@ export class TopDownMap {
       ctx.font = '15px serif';
       ctx.fillStyle = '#2a1c10';
       ctx.fillText(ICONS[lm.type] || '•', x, y + 5);
-      if (this.zoom > 0.35 || ['eye', 'station', 'guild', 'threshold', 'gallery', 'plain'].includes(lm.type)) {
+      if (this.zoom > 0.35 || ['eye', 'station', 'guild', 'fourthgate', 'basin', 'sinkhole', 'gallery', 'plain'].includes(lm.type)) {
         ctx.font = 'italic 12px Georgia, serif';
         placeLabel(ctx, lm.name, x, y - 9, placed, 'center', 'rgba(230,220,190,0.8)');
       }
@@ -450,13 +456,13 @@ export class TopDownMap {
 // ---------------------------------------------------------------------------
 /** Piecewise depth scale for the schematic: the charted layers get room. */
 const SCHEME = [
-  { y0: 120, y1: 0, h: 0.06 },          // surface
-  { y0: 0, y1: -350, h: 0.2 },           // layer 1
-  { y0: -350, y1: -900, h: 0.24 },       // layer 2
-  { y0: -900, y1: -2600, h: 0.2 },       // layer 3
-  { y0: -2600, y1: -4000, h: 0.07 },
-  { y0: -4000, y1: -6000, h: 0.07 },
-  { y0: -6000, y1: -12000, h: 0.08 },
+  { y0: 120, y1: 0, h: 0.05 },           // surface
+  { y0: 0, y1: -350, h: 0.16 },          // layer 1
+  { y0: -350, y1: -900, h: 0.2 },        // layer 2
+  { y0: -900, y1: -1900, h: 0.27 },      // layer 3
+  { y0: -1900, y1: -3200, h: 0.1 },      // layer 4
+  { y0: -3200, y1: -6000, h: 0.07 },
+  { y0: -6000, y1: -12000, h: 0.07 },
   { y0: -12000, y1: -20000, h: 0.08 },
 ];
 
@@ -513,7 +519,7 @@ export class VerticalMap {
         const o = (c.off + s) * 2;
         spans.push([c.y[o], c.y[o + 1], c.mat[o]]);
       }
-      const ex = [0, 1, 2].map((b) => g.mapData.explored(b, x, z));
+      const ex = BANDS.map((_, b) => g.mapData.explored(b, x, z));
       cols.push({ r, x, z, spans, water: c.water, ex });
     }
     this.profile = { th, rMax, step, cols, pr: P.r, py: p.y };
@@ -574,18 +580,18 @@ export class VerticalMap {
   drawSection(ctx, x, y, w, h) {
     const g = this.game, P = this.profile;
     if (!P) return;
-    const yTop = 90, yBot = -1010;
+    const yTop = 90, yBot = -2000;
     const sx = (r) => x + (r / P.rMax) * w;
     const sy = (v) => y + ((yTop - v) / (yTop - yBot)) * h;
     // sky and abyss gradient
     const grd = ctx.createLinearGradient(0, y, 0, y + h);
     const off = (v) => clamp((sy(v) - y) / h, 0, 1);
-    grd.addColorStop(0, '#6d8aa0'); grd.addColorStop(off(-350), '#2e4650'); grd.addColorStop(off(-900), '#141c1e'); grd.addColorStop(1, '#1a0c0c');
+    grd.addColorStop(0, '#6d8aa0'); grd.addColorStop(off(-350), '#2e4650'); grd.addColorStop(off(-900), '#141c1e'); grd.addColorStop(off(-1400), '#1c0f0e'); grd.addColorStop(1, '#0a1416');
     ctx.fillStyle = grd;
     ctx.fillRect(x, y, w, h);
     // layer bands
     ctx.font = 'italic 11px Georgia, serif';
-    for (const [yy, label, li] of [[LAYER_BOUNDARIES.layer2Top, 'Second Layer', 2], [LAYER_BOUNDARIES.layer3Top, 'Third Layer', 3]]) {
+    for (const [yy, label, li] of [[LAYER_BOUNDARIES.layer2Top, 'Second Layer', 2], [LAYER_BOUNDARIES.layer3Top, 'Third Layer', 3], [LAYER_BOUNDARIES.layer4Top, 'Fourth Layer', 4]]) {
       ctx.strokeStyle = 'rgba(220,200,150,0.35)'; ctx.setLineDash([8, 6]);
       ctx.beginPath(); ctx.moveTo(x, sy(yy)); ctx.lineTo(x + w, sy(yy)); ctx.stroke(); ctx.setLineDash([]);
       ctx.fillStyle = 'rgba(230,215,170,0.8)';
@@ -598,7 +604,7 @@ export class VerticalMap {
       for (const [y0, y1, mat] of c.spans) {
         if (y1 < yBot || y0 > yTop) continue;
         const a = Math.max(y0, yBot), b = Math.min(y1, yTop);
-        const band = b > -345 ? 0 : b > -895 ? 1 : 2;
+        const band = bandOf(b);
         const ex = c.ex[band];
         const m = MATERIALS[mat];
         const base = m ? m.color : [0.4, 0.4, 0.4];
@@ -640,7 +646,7 @@ export class VerticalMap {
     ctx.beginPath(); ctx.arc(X, Y - 3, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     // depth axis
     ctx.fillStyle = 'rgba(230,220,200,0.75)'; ctx.font = '10px sans-serif';
-    for (let d = 0; d >= -1000; d -= 100) { ctx.fillRect(x, sy(d), 5, 1); ctx.fillText(`${-d} m`, x + 7, sy(d) + 3); }
+    for (let d = 0; d >= -1900; d -= 200) { ctx.fillRect(x, sy(d), 5, 1); ctx.fillText(`${-d} m`, x + 7, sy(d) + 3); }
     ctx.font = 'italic 12px Georgia, serif';
     ctx.fillStyle = 'rgba(240,230,210,0.85)';
     ctx.fillText('Cross-section along your bearing from the Eye', x + 8, y + 16);

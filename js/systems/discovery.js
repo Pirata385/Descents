@@ -16,9 +16,10 @@ const FULL_OBSERVATION = 24;
 
 const LANDMARK_RADIUS = {
   eye: 420, waterfall: 160, lake: 120, gate: 70, guild: 90, market: 60, temple: 90, observatory: 90, hamlet: 90, platform: 40,
-  ruin: 60, arch: 80, spire: 90, station: 70, gallery: 140, plain: 220, stair: 60, fault: 260, threshold: 60, cave: 26, crystal: 45,
+  ruin: 60, arch: 80, spire: 90, station: 70, gallery: 140, plain: 220, stair: 60, fault: 260, cave: 26, crystal: 45,
+  sinkhole: 30, hall: 24, window: 22, rookery: 40, basin: 160, fourthgate: 30,
 };
-const LANDMARK_DY = { eye: 900, waterfall: 220, gallery: 120, plain: 160, fault: 400, stair: 300, lake: 60, spire: 120, arch: 90 };
+const LANDMARK_DY = { eye: 900, waterfall: 220, gallery: 120, plain: 160, fault: 400, stair: 300, lake: 60, spire: 120, arch: 90, sinkhole: 20, hall: 14, window: 12, rookery: 30, basin: 60, fourthgate: 16 };
 
 const INTERACTION_TEXT = {
   hunt: (a, b) => [a, `Hunts the ${b}`, b, `Hunted by the ${a}`],

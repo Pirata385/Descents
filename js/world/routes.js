@@ -18,7 +18,6 @@ export const STYLES = {
   trail: { type: RT.TRAIL, hw: 1.7, clear: 3.8, cutLimit: 4.5, fillLimit: 5, deck: 1.0, mat: M.PATH, stairMat: M.RUIN, bridgeMat: M.WOOD, fillSide: M.DIRT, maxSlope: 0.5, priority: 2, maxLod: 1 },
   ledge: { type: RT.LEDGE, hw: 2.1, clear: 4.2, cutLimit: 0.6, fillLimit: 1.2, deck: 3.0, mat: M.GRAVEL, stairMat: M.GRAVEL, bridgeMat: M.SHAFTROCK, deckSide: M.SHAFTROCK, fillSide: M.SHAFTROCK, ceil: M.SHAFTROCK, maxSlope: 0.5, priority: 6, maxLod: 3 },
   plainTrail: { type: RT.TRAIL, hw: 1.7, clear: 3.8, cutLimit: 4, fillLimit: 5, deck: 1.2, mat: M.GRAVEL, stairMat: M.RUIN2, bridgeMat: M.RUIN2, fillSide: M.STONEPLAIN, maxSlope: 0.45, priority: 2, maxLod: 1 },
-  faultLedge: { type: RT.LEDGE, hw: 2.0, clear: 4.0, cutLimit: 0.6, fillLimit: 1.2, deck: 2.6, mat: M.BASALT, stairMat: M.BASALT, bridgeMat: M.BASALT, deckSide: M.BASALT, fillSide: M.BASALT, ceil: M.BASALT, maxSlope: 0.5, priority: 6, maxLod: 3 },
   galleryTrail: { type: RT.TRAIL, hw: 1.6, clear: 3.8, cutLimit: 4, fillLimit: 4, deck: 1.4, mat: M.LITTER, stairMat: M.RUIN2, bridgeMat: M.WOOD, fillSide: M.DARKROCK, maxSlope: 0.45, priority: 2, maxLod: 1 },
 };
 

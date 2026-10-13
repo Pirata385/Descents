@@ -2,7 +2,7 @@
 // seed and its site: category, shape archetype and parameters (for the mesh
 // builder), material, size, rarity grade, passive effects, an active ability,
 // drawbacks, a name and a short origin note. Placement is contextual (ruins,
-// cave chambers, spires, crystal geodes, waterfalls, the threshold).
+// cave chambers, spires, crystal geodes, waterfalls, the fault caves and the Fourth Gate).
 import { RNG } from '../core/rng.js';
 import { clamp } from '../core/mathutil.js';
 import { LAYERS } from '../world/layers.js';
@@ -120,7 +120,7 @@ const ORIGIN_SNIPPETS = [
 ];
 
 export function generateArtifact(seed, id, site, names) {
-  const layer = LAYERS[clamp(site.layer, 0, 3)];
+  const layer = LAYERS[clamp(site.layer, 0, 4)];
   const rng = RNG.derive(seed, 'artifact', id);
   const pool = layer.artifacts || LAYERS[1].artifacts;
   const category = pickWeighted(rng, pool.categories);

@@ -316,11 +316,11 @@ export function generateSpecies(seed, names) {
   const used = new Set();
   const counts = { surface: [4, 5], layer1: [10, 12], layer2: [10, 12], layer3: [1, 2] };
   for (const layer of LAYERS) {
-    if (!layer.implemented || !layer.ecology) continue;
+    if (!layer.implemented || !layer.ecology || !layer.ecology.roles) continue;
     const rng = RNG.derive(seed, 'species', layer.id);
     const [lo, hi] = counts[layer.id] || [3, 5];
     const n = rng.int(lo, hi);
-    const roles = layer.ecology.roles.slice();
+    const roles = (layer.ecology.roles || []).slice();
     const chosenRoles = [];
     // make sure the core roles exist first, then fill the rest
     for (let i = 0; i < n; i++) chosenRoles.push(i < roles.length ? roles[i] : rng.pick(roles));

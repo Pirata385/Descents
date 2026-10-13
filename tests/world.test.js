@@ -6,7 +6,7 @@ import { ColumnGen, ColumnData, CF } from '../js/world/column.js';
 import { Z_CITY, Z_BOWL, Z_EYE } from '../js/world/field.js';
 import { LAYER_BOUNDARIES } from '../js/world/layers.js';
 
-const REQUIRED = ['Lip Approach', 'The Great Spiral', 'The Long Stair', 'Plain Trail', 'Threshold Descent'];
+const REQUIRED = ['Lip Approach', 'The Great Spiral', 'The Long Stair', 'Plain Trail'];
 const L1_JOURNEYS = ["Delvers' Road", 'River Trail', 'Cavern Way', 'Ridge Trail'];
 
 export function planSignature(plan) {
@@ -69,7 +69,7 @@ export async function worldTests(seeds, plans) {
       assert(streets.length > 10, 'city needs a street network');
     });
 
-    await test(`[${seed}] layer structure: rim, Layer 1 bowl, Abyss Eye, Layer 2, Layer 3 entrance`, () => {
+    await test(`[${seed}] layer structure: rim, Layer 1 bowl, Abyss Eye, Layer 2, Layer 3, Layer 4 entrance`, () => {
       const p = plan.params;
       let bowlOk = 0, n = 0;
       for (let k = 0; k < 72; k++) {
@@ -92,9 +92,10 @@ export async function worldTests(seeds, plans) {
       assert(col.topY() < LAYER_BOUNDARIES.layer2Top, 'the Eye must be open down into Layer 2');
       assert(plan.galleryWindows.length >= 2, 'Layer 2 needs gallery openings');
       assert(p.plainY < LAYER_BOUNDARIES.layer2Top && p.plainY > LAYER_BOUNDARIES.layer3Top, 'Stone Plain must be in Layer 2');
-      assert(plan.threshold.y < LAYER_BOUNDARIES.layer3Top, 'the Threshold must reach Layer 3');
+      assert(plan.fault.basin.y < LAYER_BOUNDARIES.layer4Top, 'the basin at the bottom of the fault must open into Layer 4');
+      assert(LAYER_BOUNDARIES.layer3Top - LAYER_BOUNDARIES.layer4Top >= 950, 'Layer 3 must be about 1000 m deep');
       const lmTypes = new Set(plan.landmarks.map((l) => l.type));
-      for (const t of ['eye', 'station', 'gallery', 'plain', 'fault', 'threshold']) assert(lmTypes.has(t), `missing landmark ${t}`);
+      for (const t of ['eye', 'station', 'gallery', 'plain', 'fault', 'sinkhole', 'hall', 'basin', 'fourthgate']) assert(lmTypes.has(t), `missing landmark ${t}`);
       // inverted forest: gallery windows open to galleries with ceilings
       let ceil = 0;
       for (const w of plan.galleryWindows) {
@@ -105,10 +106,45 @@ export async function worldTests(seeds, plans) {
         if (fi >= 0 && fi + 1 < col.n && col.y0[fi + 1] - col.y1[fi] > 8) ceil++;
       }
       assert(ceil >= Math.ceil(plan.galleryWindows.length * 0.6), 'gallery chambers need floors and ceilings');
-      note(`eye ${p.eyeR.toFixed(0)} m · lip ${p.lipY.toFixed(0)} m · plain ${p.plainY.toFixed(0)} m · threshold ${plan.threshold.y.toFixed(0)} m · ${plan.galleryWindows.length} gallery windows`);
+      note(`eye ${p.eyeR.toFixed(0)} m · lip ${p.lipY.toFixed(0)} m · plain ${p.plainY.toFixed(0)} m · basin ${plan.fault.basin.y.toFixed(0)} m · ${plan.galleryWindows.length} gallery windows`);
     });
 
-    await test(`[${seed}] guaranteed routes validate (city → Layer 1 → Layer 2 → Layer 3)`, () => {
+    await test(`[${seed}] Layer 3: the Great Fault chasm and its cave network`, () => {
+      const p = plan.params, F = plan.fault, ch = gen.chasm;
+      // the chasm: open air from just below the plain to the basin at the axis, walls hundreds of metres apart
+      const [cx, cz] = ch.centreAt(-1400);
+      gen.column(cx, cz, 0, col);
+      let open = 0;
+      for (let y = p.chasm.yWide - 10; y > p.chasm.floorY + 20; y -= 10) if (col.spanAt(y) < 0) open++;
+      assert(open / Math.floor((p.chasm.yWide - 30 - p.chasm.floorY) / 10) > 0.9, 'the chasm axis must be open air');
+      const widths = [-1100, -1400, -1700].map((y) => ch.wallDist(0, y) + ch.wallDist(Math.PI, y));
+      for (const w of widths) assert(w > 180, `chasm too narrow (${w.toFixed(0)} m)`);
+      // no staircase or ledge route descends into Layer 3: the way down is the cave network
+      for (const r of plan.routes) {
+        let lo = Infinity;
+        for (let i = 1; i < r.pts.length; i += 3) lo = Math.min(lo, r.pts[i]);
+        assert(lo > p.plainY - 12, `route ${r.name} descends below the plain`);
+      }
+      assert(F.sinkholes.length >= 1, 'sinkholes must lead from the plain into the caves');
+      assert(F.halls.length >= 10, `too few cave halls (${F.halls.length})`);
+      assert(F.windows.length >= 2, 'the caves need windows onto the chasm');
+      assert(F.dens.length >= 3, 'the caves need dens for cave fauna');
+      assert(F.nests.length >= 40 && F.roosts.length >= 20, 'the chasm walls need nesting sites and roosts');
+      assert(F.exit && F.gate, 'the network must open onto the basin, where the Fourth Gate stands');
+      assert(plan.validation.faultConnected, 'walkable passages must connect the plain to the basin and the Fourth Gate');
+      const fv = plan.validation.caves.filter((v) => plan.caves.find((c) => c.id === v.id)?.layer === 3);
+      const bad = fv.filter((v) => !v.ok);
+      assert(bad.length === 0, `fault passages failing validation: ${bad.map((v) => `${v.name} (${v.first[0]?.why})`).join(', ')}`);
+      // the plain trail reaches a sinkhole
+      const trail = plan.routes.find((r) => r.name === 'Plain Trail');
+      const tx = trail.pts[trail.pts.length - 3], tz = trail.pts[trail.pts.length - 1];
+      assert(F.sinkholes.some((sk) => Math.hypot(sk.x - tx, sk.z - tz) < 16), 'the Plain Trail must end at a sinkhole');
+      const kinds = {};
+      for (const c of plan.caves) if (c.layer === 3) kinds[c.kind] = (kinds[c.kind] || 0) + 1;
+      note(`${F.halls.length} halls · ${kinds.fault || 0} passages · ${F.sinkholes.length} sinkholes · ${F.windows.length} windows · ${F.dens.length} dens · ${F.nests.length} nests · chasm ${widths.map((w) => w.toFixed(0)).join('/')} m wide, floor ${p.chasm.floorY.toFixed(0)} m${plan.validation.pruned ? ` · pruned ${plan.validation.pruned.length}` : ''}`);
+    });
+
+    await test(`[${seed}] guaranteed routes validate (city → Layer 1 → Layer 2 → the Stone Plain)`, () => {
       const v = plan.validation.routes;
       const byName = new Map(v.map((r) => [r.name, r]));
       for (const name of REQUIRED) {
@@ -128,7 +164,7 @@ export async function worldTests(seeds, plans) {
       assert(okCaves / Math.max(1, caves.length) >= 0.85, 'too many caves fail validation');
     });
 
-    await test(`[${seed}] route network connects the city to Layer 3`, () => {
+    await test(`[${seed}] route network connects the city to the Stone Plain and the fault caves`, () => {
       // routes are connected where their points come close in 3D
       const routes = plan.routes;
       const cells = new Map();

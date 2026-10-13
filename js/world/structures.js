@@ -16,6 +16,7 @@ export const PK = {
   ARCH: 10,    // arched bridge / natural arch along a segment
   MATPATCH: 11, // change top material of terrain (fields, plazas)
   SPIRE: 12,   // rock spire: cone of rock from y0 to y1
+  SHELF: 13,   // rock shelf grown into open air: flat top at y1, rounded underside h deep
 };
 
 export const OP_ADD = 0;
@@ -47,7 +48,7 @@ function base(kind, op, x, z, opts) {
 
 function finishBR(p) {
   switch (p.kind) {
-    case PK.CYL: case PK.CONE: case PK.DOME: case PK.RING: case PK.SPIRE:
+    case PK.CYL: case PK.CONE: case PK.DOME: case PK.RING: case PK.SPIRE: case PK.SHELF:
       p.br = p.r + p.feather + 1; break;
     case PK.ARCH:
       p.br = Math.hypot(p.bx - p.x, p.bz - p.z) / 2 + p.width + 1;
@@ -72,6 +73,7 @@ export const ring = (x, z, o) => finishBR(base(PK.RING, OP_ADD, x, z, o));
 export const arch = (x, z, o) => finishBR(base(PK.ARCH, OP_ADD, x, z, o));
 export const matPatch = (x, z, o) => finishBR(base(PK.MATPATCH, OP_ADD, x, z, o));
 export const spire = (x, z, o) => finishBR(base(PK.SPIRE, OP_ADD, x, z, o));
+export const shelf = (x, z, o) => finishBR(base(PK.SHELF, OP_ADD, x, z, o));
 
 /**
  * Build a house-like building as a list of primitives.

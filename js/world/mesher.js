@@ -3,7 +3,7 @@
 // Produces: terrain (hex tops, ceilings, exposed side faces), water surfaces,
 // river waterfall curtains, foliage/decor (vegetation rules per layer and
 // biome, plan decor), and for LOD 0 the column spans used for collision.
-import { ColumnData, BOTTOM, CF } from './column.js';
+import { ColumnData, BOTTOM, CF, MAX_SPANS } from './column.js';
 import { MeshBuffer, Xform, emitTemplate } from './geomkit.js';
 import { HEX_W, HEX_R, ROW_H, DIRS, CORNERS, DIR_NORMALS } from '../core/hex.js';
 import { M, MATERIALS, isGrassy } from './materials.js';
@@ -30,7 +30,7 @@ export class ChunkMesher {
     const W = CHUNK + MARGIN * 2;
     this.W = W;
     this.cols = new Array(W * W);
-    for (let i = 0; i < W * W; i++) this.cols[i] = { n: 0, y0: new Float32Array(24), y1: new Float32Array(24), top: new Uint8Array(24), side: new Uint8Array(24), bot: new Uint8Array(24), exp: new Float32Array(24), nw: 0, wl: new Float32Array(4), wsp: new Int8Array(4), wkind: new Uint8Array(4), wfx: new Float32Array(4), wfz: new Float32Array(4), zone: 0, flags: 0, biome: 0, galU: 0, x: 0, z: 0 };
+    for (let i = 0; i < W * W; i++) this.cols[i] = { n: 0, y0: new Float32Array(MAX_SPANS), y1: new Float32Array(MAX_SPANS), top: new Uint8Array(MAX_SPANS), side: new Uint8Array(MAX_SPANS), bot: new Uint8Array(MAX_SPANS), exp: new Float32Array(MAX_SPANS), nw: 0, wl: new Float32Array(4), wsp: new Int8Array(4), wkind: new Uint8Array(4), wfx: new Float32Array(4), wfz: new Float32Array(4), zone: 0, flags: 0, biome: 0, galU: 0, x: 0, z: 0 };
     // decor index
     this.decorGrid = new SpatialGrid(32);
     const decor = plan.city?.decor || [];

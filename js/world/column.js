@@ -6,6 +6,7 @@
 // Used by chunk workers (meshing), the main thread (collision queries) and
 // the plan validator.
 import { TerrainField, Z_EYE, Z_BOWL, Z_CITY, Z_COUNTRY, Z_SEA } from './field.js';
+import { Chasm } from './chasm.js';
 import { SpatialGrid } from './spatial.js';
 import { M } from './materials.js';
 import { PK, OP_ADD, OP_CARVE } from './structures.js';
@@ -14,8 +15,8 @@ import { fbm2, ridged2, worley2 } from '../core/noise.js';
 import { hash32 } from '../core/rng.js';
 import { clamp, clamp01, smoothstep, wrapAngle } from '../core/mathutil.js';
 
-export const MAX_SPANS = 24;
-export const BOTTOM = -1120;
+export const MAX_SPANS = 32;
+export const BOTTOM = -2060;
 export const RT = { ROAD: 1, STREET: 2, TRAIL: 3, LEDGE: 4, TUNNEL: 5, STAIR: 6 };
 
 // column flags
@@ -181,6 +182,8 @@ export class ColumnGen {
     this.plan = plan;
     this.p = plan.params;
     this.field = new TerrainField(plan.params);
+    this.chasm = new Chasm(plan.params, this.field);
+    this.plainY = plan.params.plainY;
     this.P = {}; this.S = {}; this.FP = {}; this.LK = {}; this.W = {};
     this.buildIndexes();
   }
@@ -346,19 +349,33 @@ export class ColumnGen {
   deepCarve(x, z, P, lod, col) {
     const f = this.field, p = this.p;
     const r = P.r;
-    // Fault (Layer 3 entrance) - a deep hole in the stone plain
-    if (r < P.Re + 40) {
-      const FP = f.faultPolar(x, z, this.FP);
-      if (FP.fr < FP.Rf) {
-        const ff = p.fault.bottomY + fbm2(f.nPlain, x / 30, z / 30, 2) * 4;
-        col.carve(ff, p.plainY + (r < P.Re ? 30 : 6), M.BASALT, M.BASALT, r < P.Re ? 0.9 : 0.4);
-        col.side[0] = M.BASALT;
-        col.flags |= CF.FAULT;
-        // threshold ledges ring the fault walls
-      } else if (FP.fr < FP.Rf + 14) {
-        // basalt rim
-        if (col.n) { col.top[col.n - 1] = r < P.Re ? M.BASALT : col.top[col.n - 1]; }
+    // The Great Fault: the plain hole, its throat and the chasm below (Layer 3)
+    const ch = this.chasm;
+    const nI = ch.intervals(x, z);
+    if (nI) {
+      const iv = ch._iv;
+      const c = p.chasm;
+      for (let k = 0; k < nI; k++) {
+        const top = iv[k * 2];
+        let bot = iv[k * 2 + 1];
+        const basin = bot < c.floorY + 12;
+        if (basin) bot += fbm2(f.nPlain, x / 26 + 40, z / 26, 3) * 1.8 + Math.max(0, ridged2(f.nPlain, x / 18, z / 18 - 30, 2) - 0.7) * 9;
+        // floors: ember gravel high up, lichen-carpeted ledges lower down, pale stone in the basin
+        const v = f.nPlain.noise2(x / 23 + 7, z / 23 - 3) + (bot < -1200 ? 0.35 : -0.25) + (bot < -1650 ? 0.3 : 0);
+        const floorMat = basin ? (v > 0.75 ? M.LICHEN : M.DEEPSTONE) : bot > -1150 ? (v > 0.2 ? M.BASALT : M.GRAVEL) : v > 0.55 ? M.LICHEN : M.FAULTROCK;
+        const ceilMat = top > c.yThroat - 6 ? M.BASALT : M.FAULTROCK;
+        // light falls through the plain hole: a faint shaft below the mouth
+        const below = this.plainY - bot;
+        const exp = 0.03 + 0.6 * Math.exp(-below / 300) * (1 - smoothstep(0, 70, ch.clearanceMouth(x, z)));
+        col.carve(bot, top, floorMat, ceilMat, exp);
       }
+      col.flags |= CF.FAULT;
+      for (let i = 0; i < col.n; i++) if (col.y1[i] < this.plainY - 3 && col.side[i] === M.ROCK) col.side[i] = M.FAULTROCK;
+    }
+    if (r < P.Re && col.n && col.y1[col.n - 1] > this.plainY - 12) {
+      // basalt rim around the plain hole
+      const FP = f.faultPolar(x, z, this.FP);
+      if (FP.fr > FP.Rf - 1 && FP.fr < FP.Rf + 14) col.top[col.n - 1] = M.BASALT;
     }
     if (r < P.Re) return;
     // Bell chamber with the Stone Plain
@@ -416,7 +433,18 @@ export class ColumnGen {
       if (d2 >= rr * rr) continue;
       const cy = ay + (by - ay) * t;
       const half = Math.sqrt(rr * rr - d2);
-      col.carve(cy - half * 0.55, cy + half, (c[i + 8] & 1) ? M.GRAVEL : M.DIRT, M.ROCK, 0.07);
+      const code = c[i + 8];
+      const mc = (code / 65536) | 0;
+      if (mc === 0) col.carve(cy - half * 0.55, cy + half, (code & 1) ? M.GRAVEL : M.DIRT, M.ROCK, 0.07);
+      else {
+        // Layer 3 caves: fault rock and gravel with lichen patches, soft den floors, pale deep stone
+        const v = this.field.nPlain.noise2(x / 9 + 13, z / 9 - 5) + this.field.nPlain.noise2(x / 3.3, z / 3.3) * 0.35;
+        let fm, cm = M.FAULTROCK;
+        if (mc === 1) fm = v > 0.62 ? M.LICHEN : v > 0.05 ? M.FAULTROCK : M.GRAVEL;
+        else if (mc === 2) fm = v > 0.45 ? M.FUNGUS : v > -0.2 ? M.DIRT : M.LITTER;
+        else { fm = v > 0.5 ? M.LICHEN : M.DEEPSTONE; cm = M.DEEPSTONE; }
+        col.carve(cy - half * 0.55, cy + half, fm, cm, 0.05);
+      }
       col.flags |= CF.CAVE;
     }
   }
@@ -603,6 +631,18 @@ export class ColumnGen {
             const from = fi >= 0 && pr.y0 - col.y1[fi] < 6 ? Math.min(col.y1[fi], pr.y0) : pr.y0 - 1;
             col.add(from - 1, Math.max(pr.y0 + 0.5, top), pr.top, pr.side, pr.side, 0.6);
           }
+          break;
+        }
+        case PK.SHELF: {
+          const d2 = dx * dx + dz * dz;
+          if (d2 > pr.r * pr.r) break;
+          const t = Math.sqrt(d2) / pr.r;
+          const top = pr.y1 - t * t * t * 0.8;
+          // shelves only grow into open air (the part inside the wall is already rock);
+          // their body replaces whatever thin floor lies just beneath
+          const si = col.spanAt(top - 0.05);
+          if (si >= 0 && col.y1[si] - col.y0[si] > 0.6) break;
+          col.add(top - 0.6 - pr.h * Math.sqrt(Math.max(0, 1 - t * t)), top, pr.top, pr.side, pr.side, 0.5);
           break;
         }
         case PK.DOME: {

@@ -8,7 +8,7 @@ export const LAYER_BOUNDARIES = {
   layer1Top: 80,      // above this is sky
   layer2Top: -350,    // depth 350 m below the rim
   layer3Top: -900,    // depth 900 m
-  layer4Top: -2600,   // future
+  layer4Top: -1900,   // depth 1900 m: the basin at the bottom of the Great Fault
 };
 
 export const LAYERS = [
@@ -88,28 +88,47 @@ export const LAYERS = [
     index: 3,
     name: 'Third Layer',
     title: 'The Great Fault',
-    depthLabel: '900 - 2600 m',
+    depthLabel: '900 - 1900 m',
     yTop: -900,
-    yBottom: -2600,
+    yBottom: -1900,
+    implemented: true,
+    visuals: {
+      fogColor: [0.13, 0.1, 0.11], fogDensity: 0.0032,
+      skyTint: [0.5, 0.42, 0.42], ambient: [0.3, 0.24, 0.24], sun: [0.55, 0.42, 0.36],
+      particles: 'embers',
+    },
+    audio: { wind: 0.8, water: 0.35, birds: 0, city: 0, drips: 0.7, reverb: 0.7, music: 'fault' },
+    ecology: {
+      // caves: small lizards and mammals; chasm: birds, lizards and flying mammals
+      niches: ['cave_lizard', 'cave_mammal', 'chasm_bird', 'chasm_lizard', 'chasm_flier'],
+      density: 0.9,
+    },
+    artifacts: { count: 22, rarity: [0.18, 0.34, 0.3, 0.14, 0.04], categories: { relic: 3, unknown: 3, organic: 2, weapon: 1, ritual: 2, scientific: 2, equipment: 2, amulet: 1, mechanical: 1 } },
+    vegetation: { grass: 0, flowers: 0, shrubs: 0.04, trees: 0, lichen: 1 },
+    traversal: 'A colossal chasm a kilometre deep. Sinkholes in the Stone Plain open into a cave network that winds down inside its walls, with windows onto the void.',
+  },
+  {
+    id: 'layer4',
+    index: 4,
+    name: 'Fourth Layer',
+    title: 'The Lantern Sea',
+    depthLabel: '1900 - 3200 m',
+    yTop: -1900,
+    yBottom: -3200,
     implemented: true,
     partial: true,
     visuals: {
-      fogColor: [0.16, 0.1, 0.1], fogDensity: 0.006,
-      skyTint: [0.5, 0.4, 0.4], ambient: [0.28, 0.2, 0.2], sun: [0.5, 0.36, 0.3],
-      particles: 'embers',
+      fogColor: [0.06, 0.12, 0.14], fogDensity: 0.0045,
+      skyTint: [0.3, 0.45, 0.5], ambient: [0.2, 0.3, 0.34], sun: [0.3, 0.42, 0.46],
+      particles: 'motes',
     },
-    audio: { wind: 0.7, water: 0.3, birds: 0, city: 0, drips: 0.4, reverb: 0.6, music: 'fault' },
-    ecology: {
-      roles: ['fault_stalker'],
-      density: 0.4,
-      playerAware: true,
-    },
-    artifacts: { count: 4, rarity: [0.1, 0.3, 0.35, 0.2, 0.05], categories: { relic: 2, unknown: 3, organic: 1, weapon: 1, ritual: 1 } },
-    vegetation: { grass: 0, flowers: 0, shrubs: 0.05, trees: 0 },
-    traversal: 'A vertical maze of shafts. Only the threshold has been charted.',
+    audio: { wind: 0.3, water: 1, birds: 0, city: 0, drips: 1, reverb: 0.85, music: 'lantern' },
+    ecology: { niches: [], density: 0 },
+    artifacts: { count: 2, rarity: [0, 0.2, 0.4, 0.3, 0.1], categories: { relic: 1, unknown: 1, ritual: 1 } },
+    vegetation: { grass: 0, flowers: 0, shrubs: 0, trees: 0, lichen: 1 },
+    traversal: 'Only the flooded basin below the Great Fault and the Fourth Gate have been charted.',
   },
-  { id: 'layer4', index: 4, name: 'Fourth Layer', title: 'Uncharted', depthLabel: '2600 - 4000 m', yTop: -2600, yBottom: -4000, implemented: false },
-  { id: 'layer5', index: 5, name: 'Fifth Layer', title: 'Uncharted', depthLabel: '4000 - 6000 m', yTop: -4000, yBottom: -6000, implemented: false },
+  { id: 'layer5', index: 5, name: 'Fifth Layer', title: 'Uncharted', depthLabel: '3200 - 6000 m', yTop: -3200, yBottom: -6000, implemented: false },
   { id: 'layer6', index: 6, name: 'Sixth Layer', title: 'Uncharted', depthLabel: '6000 - 12000 m', yTop: -6000, yBottom: -12000, implemented: false },
   { id: 'layer7', index: 7, name: 'Seventh Layer', title: 'Uncharted', depthLabel: '12000 m +', yTop: -12000, yBottom: -20000, implemented: false },
 ];

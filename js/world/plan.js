@@ -9,12 +9,13 @@ import { NameGen } from './names.js';
 import { TerrainField, Z_EYE, Z_BOWL } from './field.js';
 import { buildCoarseGrid, computeHydrology, buildRivers } from './hydrology.js';
 import { generateCaves, cavesToCapsules } from './caves.js';
-import { planSpiral, planGalleryWindows, planRibs, planLongStair, planFaultSpiral, planDeepTunnels } from './abyss.js';
+import { planSpiral, planGalleryWindows, planRibs, planLongStair, planDeepTunnels } from './abyss.js';
+import { planFaultCaves, findChasmSites } from './faultcaves.js';
 import { generateCity } from './city.js';
-import { generateL1Features, generateL2Features, compileRuin } from './ruins.js';
+import { generateL1Features, generateL2Features } from './ruins.js';
 import { ColumnGen, ColumnData } from './column.js';
 import { M } from './materials.js';
-import { box, cyl, flat, building, OP_ADD, resetPrimOrder } from './structures.js';
+import { box, flat, building, resetPrimOrder } from './structures.js';
 import { STYLES, astar, trailCost, smoothPath, profileRoute, makeRoute, validatePath, densify, routeTo3, RouteIndex } from './routes.js';
 import { SpatialGrid } from './spatial.js';
 import { LAYER_BOUNDARIES } from './layers.js';
@@ -163,25 +164,52 @@ export function generatePlan(seedInput, progress = () => {}) {
   tempGen = new ColumnGen(plan);
   mark('deep');
 
+  // ---- Layer 3: the cave network inside the walls of the Great Fault
+  progress('Opening the Great Fault', 0.43);
+  const longStair = planLongStair(field, params, spiral, bellRibs, plainFloorAt);
+  const lastStair = longStair.pts[longStair.pts.length - 1];
+  // waterfall plunge pools on the plain (planned below) are kept clear of sinkholes
+  const plungeAvoid = eyeFalls.map((ef) => {
+    const th = Math.atan2(field.warpZ(ef.x, ef.z), field.warpX(ef.x, ef.z));
+    const [px, pz] = field.fromPolar(eyeR(th) - 14, th);
+    return { x: px, z: pz, r: 9 + ef.width + 16 };
+  });
+  const faultNet = planFaultCaves({
+    field, params, chasm: tempGen.chasm, names, caves, plainFloorAt, floorIn, ribs: bellRibs,
+    stairEnd: [lastStair[0], lastStair[1]], avoid: plungeAvoid,
+  });
+  for (const c of faultNet.caves) { c.id = caves.length; caves.push(c); }
+  plan.capsules = cavesToCapsules(caves);
+  plan.prims = faultNet.prims.slice();
+  tempGen = new ColumnGen(plan);
+  mark('fault');
+
   progress('Growing the inverted forest', 0.46);
   const avoidPts = [];
   for (const c of caves) if (c.kind === 'deep') for (const nd of [...c.nodes.slice(0, 10), ...c.nodes.slice(-10)]) avoidPts.push(nd);
   for (const w of galleryWindows) { const [x, z] = field.fromPolar(eyeR(w.th) + 10, w.th); avoidPts.push({ x, z }); }
+  // sinkholes and the stretches of their passages just under the plain stay clear of plain features
+  const shallowFault = [];
+  for (const c of faultNet.caves) for (const nd of c.nodes) if (nd.y > params.plainY - 25) shallowFault.push(nd);
+  for (const sk of faultNet.sinkholes) avoidPts.push({ x: sk.x, z: sk.z });
+  for (const nd of shallowFault) avoidPts.push({ x: nd.x, z: nd.z });
   const l2 = generateL2Features({ field, params, names, floorIn, waterDist, avoidPts });
   mark('ruins2');
 
   // ---- pools: eye-fall plunge pools, springs in galleries and on the plain
   const rng = RNG.derive(seed, 'plan');
-  const pools = [...city.pools];
+  const pools = [...city.pools, ...faultNet.pools];
   const waterfalls = [];
   const FPq = {};
+  // where a fall drops through the plain hole it lands on whatever lies below in the chasm
+  const chasmFloorAt = (x, z) => floorIn(x, z, params.plainY - 2, -2100, 2) ?? params.fault.bottomY;
   for (const ef of eyeFalls) {
     const th = Math.atan2(field.warpZ(ef.x, ef.z), field.warpX(ef.x, ef.z));
     const [fx, fz] = field.fromPolar(eyeR(th) - 4.5, th);
     field.faultPolar(fx, fz, FPq);
     const overFault = FPq.fr < FPq.Rf + 3;
     const [px, pz] = field.fromPolar(eyeR(th) - 14, th);
-    const bottom = overFault ? params.fault.bottomY : (plainFloorAt(px, pz) ?? params.plainY);
+    const bottom = overFault ? chasmFloorAt(fx, fz) : (plainFloorAt(px, pz) ?? params.plainY);
     waterfalls.push({ x: fx, z: fz, topY: ef.topY, bottomY: bottom, width: ef.width * 1.3, dirX: -Math.cos(th), dirZ: -Math.sin(th), kind: 'eye', name: `${names.name('falls', waterfalls.length)} Falls` });
     if (!overFault) pools.push({ x: px, z: pz, r: 9 + ef.width, depth: 1.6, kind: 'plunge' });
   }
@@ -208,6 +236,7 @@ export function generatePlan(seedInput, progress = () => {}) {
     const [x, z] = field.fromPolar(rng.range(0.3, 0.8) * (field.tab(field.bellTab, th)), th);
     field.faultPolar(x, z, FPq);
     if (FPq.fr < FPq.Rf + 20) continue;
+    if (shallowFault.some((nd) => Math.hypot(nd.x - x, nd.z - z) < 30)) continue;
     if (plainFloorAt(x, z) === null) continue;
     pools.push({ x, z, r: rng.range(5, 11), depth: 1.4, kind: 'spring' });
     i++;
@@ -215,7 +244,7 @@ export function generatePlan(seedInput, progress = () => {}) {
   // compute pool levels so every rim point stands above the water
   for (const p of pools) {
     if (p.fixed) continue;
-    const ref = floorIn(p.x, p.z, 200, -1200);
+    const ref = floorIn(p.x, p.z, 200, -2100);
     if (ref === null) { p.level = NaN; continue; }
     let mn = Infinity;
     for (let a = 0; a < 16; a++) {
@@ -251,13 +280,13 @@ export function generatePlan(seedInput, progress = () => {}) {
     const [fx, fz] = field.fromPolar(eyeR(s.th) - 2.5, s.th);
     const [px, pz] = field.fromPolar(eyeR(s.th) - 12, s.th);
     field.faultPolar(fx, fz, FPq);
-    waterfalls.push({ x: fx, z: fz, topY: levels[levels.length - 1], bottomY: FPq.fr < FPq.Rf ? params.fault.bottomY : (plainFloorAt(px, pz) ?? params.plainY), width: 2.6, dirX: -Math.cos(s.th), dirZ: -Math.sin(s.th), kind: 'gallery', name: `${names.name('gfall', waterfalls.length)} Veil` });
+    waterfalls.push({ x: fx, z: fz, topY: levels[levels.length - 1], bottomY: FPq.fr < FPq.Rf ? chasmFloorAt(fx, fz) : (plainFloorAt(px, pz) ?? params.plainY), width: 2.6, dirX: -Math.cos(s.th), dirZ: -Math.sin(s.th), kind: 'gallery', name: `${names.name('gfall', waterfalls.length)} Veil` });
   }
   plan.pools = validPools;
   mark('pools');
 
-  // ---- extra structures: Lip Station camp and the Threshold
-  const extraPrims = [];
+  // ---- extra structures: Lip Station camp, the sinkholes and the Fourth Gate
+  const extraPrims = [...faultNet.prims];
   const landmarks = [...city.landmarks, ...l1.landmarks, ...l2.landmarks];
   const th0 = spiral.th0;
   const dirS = spiral.dir;
@@ -289,25 +318,7 @@ export function generatePlan(seedInput, progress = () => {}) {
   landmarks.push({ type: 'eye', name: 'The Abyss Eye', x: 0, z: 0, y: params.lipY, layer: 1 });
 
   progress('Charting routes', 0.55);
-  // Long stair needs floors; fault spiral needs the plain
-  const longStair = planLongStair(field, params, spiral, bellRibs, plainFloorAt);
-  const lastStair = longStair.pts[longStair.pts.length - 1];
-  const fault = planFaultSpiral(field, params, lastStair[0], lastStair[1], (x, z) => floorIn(x, z, params.plainY + 30, params.plainY - 30));
-  {
-    const t = fault.threshold;
-    extraPrims.push(cyl(OP_ADD, t.x, t.z, { r: 7.5, y0: t.y - 3, y1: t.y, top: M.RUIN2, side: M.BASALT }));
-    const desc = {
-      prims: [
-        { k: 'box', u: -3.5, v: 0, ang: 0, hw: 0.8, hd: 0.9, y0: -1, y1: 8, mat: M.RUIN2 },
-        { k: 'box', u: 3.5, v: 0, ang: 0, hw: 0.8, hd: 0.9, y0: -1, y1: 8, mat: M.RUIN2 },
-        { k: 'arch', u: -3.5, v: 0, bu: 3.5, bv: 0, y0: 7.2, yb: 7.2, bulge: 1.6, thick: 1.2, width: 1.0, mat: M.RUIN2 },
-      ],
-      spots: [], radius: 6,
-    };
-    const ang = t.th + Math.PI / 2;
-    for (const p of compileRuin(desc, t.x, t.y, t.z, ang)) if (p.kind !== 7) extraPrims.push(p);
-    landmarks.push({ type: 'threshold', name: 'The Threshold', x: t.x, z: t.z, y: t.y, layer: 3 });
-  }
+  landmarks.push(...faultNet.landmarks);
   landmarks.push({ type: 'fault', name: 'The Great Fault', x: params.fault.x, z: params.fault.z, y: params.plainY, layer: 2 });
   landmarks.push({ type: 'plain', name: `Stone Plain of ${names.name('plain')}`, x: lastStair[0], z: lastStair[1], y: lastStair[2], layer: 2 });
   landmarks.push({ type: 'stair', name: 'The Long Stair', x: lastStair[0], z: lastStair[1], y: (longStair.yTop + longStair.yBottom) / 2, layer: 2 });
@@ -318,7 +329,7 @@ export function generatePlan(seedInput, progress = () => {}) {
   }
   for (const wf of waterfalls) if (wf.kind === 'eye') landmarks.push({ type: 'waterfall', name: wf.name, x: wf.x, z: wf.z, y: wf.topY, layer: 1 });
   for (const lk of lakes) if (lk.cells >= 12) landmarks.push({ type: 'lake', name: lk.name, x: lk.x, z: lk.z, y: lk.level, layer: lk.level > -40 ? 0 : 1 });
-  for (const c of caves) if (c.name && c.entrance) landmarks.push({ type: 'cave', name: c.name, x: c.entrance.x, z: c.entrance.z, y: c.entrance.y, layer: c.entrance.y < LAYER_BOUNDARIES.layer2Top ? 2 : 1, kind: c.kind });
+  for (const c of caves) if (c.name && c.entrance && c.layer !== 3) landmarks.push({ type: 'cave', name: c.name, x: c.entrance.x, z: c.entrance.z, y: c.entrance.y, layer: c.entrance.y < LAYER_BOUNDARIES.layer2Top ? 2 : 1, kind: c.kind });
 
   plan.prims = [...city.prims, ...l1.prims, ...l2.prims, ...extraPrims];
   tempGen = new ColumnGen(plan);
@@ -551,9 +562,13 @@ export function generatePlan(seedInput, progress = () => {}) {
   journeys.push(spiralRoute);
   const stairRoute = addRoute('ledge', longStair.pts.map((p) => [p[0], p[2], p[1]]), { name: 'The Long Stair', kind: 'ledge', validate: true, stairMat: M.RUIN2 }, false);
   journeys.push(stairRoute);
-  {
+  const mainSink = faultNet.sinkholes[0];
+  if (mainSink) {
     const a = [lastStair[0], lastStair[1]];
-    const b = [fault.pts[0][0], fault.pts[0][1]];
+    // the trail ends on the rim of the main sinkhole, on the side facing the stair
+    const toA = Math.atan2(a[1] - mainSink.z, a[0] - mainSink.x);
+    const b = [mainSink.x + Math.cos(toA) * 9.5, mainSink.z + Math.sin(toA) * 9.5];
+    const bY = plainFloorAt(b[0], b[1]) ?? mainSink.y;
     const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
     const n = Math.max(2, Math.ceil(len / 2));
     const pts2 = [];
@@ -564,10 +579,9 @@ export function generatePlan(seedInput, progress = () => {}) {
       const off = Math.sin(Math.PI * t) * bend;
       pts2.push([a[0] + (b[0] - a[0]) * t + nxp * off, a[1] + (b[1] - a[1]) * t + nzp * off]);
     }
-    const ys = prof(pts2, 'plainTrail', { startY: lastStair[2], endY: fault.pts[0][2], refY: () => params.plainY + 20 });
+    const ys = prof(pts2, 'plainTrail', { startY: lastStair[2], endY: bY, refY: () => params.plainY + 20 });
     journeys.push(addRoute('plainTrail', pts2.map((p, i) => [p[0], ys[i], p[1]]), { name: 'Plain Trail', kind: 'trail', validate: true }));
   }
-  journeys.push(addRoute('faultLedge', fault.pts.map((p) => [p[0], p[2], p[1]]), { name: 'Threshold Descent', kind: 'ledge', validate: true }, false));
   // gallery trails: connect each spiral window to the deep tunnel mouths in that tier
   const galleryTrailCount = [];
   for (const w of galleryWindows) {
@@ -688,15 +702,14 @@ export function generatePlan(seedInput, progress = () => {}) {
 
   // ---- final column generator and validation
   progress('Validating routes', 0.72);
-  const gen = new ColumnGen(plan);
+  let gen = new ColumnGen(plan);
   const validation = { routes: [], caves: [], ok: true };
   for (const r of journeys) {
     const res = validatePath(gen, densify(routeTo3(r), 0.5), { tol: 0.9 });
     validation.routes.push({ id: r.id, name: r.name, ok: res.ok, samples: res.samples, failures: res.failures.length, first: res.failures.slice(0, 3), jumps: res.jumps, length: Math.round(r.length) });
     if (!res.ok) validation.ok = false;
   }
-  for (const c of caves) {
-    if (!c.walkable) continue;
+  const validateCave = (c) => {
     const samples = [];
     for (const [i, j] of c.links) {
       const a = c.nodes[i], b = c.nodes[j];
@@ -708,9 +721,48 @@ export function generatePlan(seedInput, progress = () => {}) {
       }
     }
     const res = validatePath(gen, samples, { tol: 1.0, drop: 4.5 });
-    validation.caves.push({ id: c.id, name: c.name, kind: c.kind, ok: res.ok, samples: res.samples, failures: res.failures.length, first: res.failures.slice(0, 3) });
-    if (!res.ok) validation.ok = false;
+    return { id: c.id, name: c.name, kind: c.kind, ok: res.ok, samples: res.samples, failures: res.failures.length, first: res.failures.slice(0, 3) };
+  };
+  let caveResults = caves.filter((c) => c.walkable).map(validateCave);
+  // the Layer 3 network must connect the plain to the basin through walkable passages
+  const faultConnected = (without) => {
+    const adj = new Map();
+    const link = (a, b) => { if (!adj.has(a)) adj.set(a, []); adj.get(a).push(b); };
+    for (const c of caves) if (c.walkable && c.from && c.to && !without.has(c)) { link(c.from, c.to); link(c.to, c.from); }
+    const seen = new Set(['plain']);
+    const queue = ['plain'];
+    while (queue.length) { const n = queue.shift(); for (const m of adj.get(n) || []) if (!seen.has(m)) { seen.add(m); queue.push(m); } }
+    return seen.has('basin') && seen.has('layer4');
+  };
+  // side passages of the fault network that fail validation are pruned when the
+  // network stays connected without them (rare overlaps the planner missed)
+  {
+    const removed = new Set();
+    for (const v of caveResults) {
+      if (v.ok) continue;
+      const c = caves.find((cv) => cv.id === v.id);
+      if (!c || c.layer !== 3) continue;
+      const trial = new Set([...removed, c]);
+      if (faultConnected(trial)) removed.add(c);
+    }
+    if (removed.size) {
+      for (const c of removed) caves.splice(caves.indexOf(c), 1);
+      const names = new Set([...removed].map((c) => c.name));
+      faultNet.sinkholes = faultNet.sinkholes.filter((sk) => !removed.has(sk.cave));
+      faultNet.windows = faultNet.windows.filter((w) => !names.has(w.name));
+      faultNet.dens = faultNet.dens.filter((d) => !removed.has(d.cave));
+      faultNet.sites = faultNet.sites.filter((st) => !names.has(st.place));
+      for (let i = landmarks.length - 1; i >= 0; i--) if (landmarks[i].layer >= 2 && names.has(landmarks[i].name) && ['sinkhole', 'window'].includes(landmarks[i].type)) landmarks.splice(i, 1);
+      plan.capsules = cavesToCapsules(caves);
+      gen = new ColumnGen(plan);
+      caveResults = caves.filter((c) => c.walkable).map(validateCave);
+      validation.pruned = [...names];
+    }
   }
+  validation.caves = caveResults;
+  for (const v of caveResults) if (!v.ok) validation.ok = false;
+  validation.faultConnected = faultConnected(new Set());
+  if (!validation.faultConnected) validation.ok = false;
   mark('validate');
 
   // ---- resolve heights of decor and landmarks against the final world
@@ -719,8 +771,9 @@ export function generatePlan(seedInput, progress = () => {}) {
   for (const d of city.decor) if (!d.y) d.y = top(d.x, d.z);
   for (const lm of landmarks) lm.y = lm.y ?? top(lm.x, lm.z);
   const spawnY = top(city.spawn.x, city.spawn.z);
+  const chasmSites = findChasmSites(gen, params, faultNet.shelves);
 
-  // ---- artifact sites (contextual): ruins, cave chambers, spires, crystals, the threshold
+  // ---- artifact sites (contextual): ruins, cave chambers, spires, crystals, the fault caves, the Fourth Gate
   progress('Hiding artifacts', 0.82);
   const sites = [];
   for (const r of [...l1.ruins, ...l2.ruins]) for (const s of r.spots) sites.push({ x: s.x, z: s.z, y: floorNear(s.x, s.z, s.y), layer: r.layer, context: s.context, place: r.name, kind: 'ruin' });
@@ -728,15 +781,12 @@ export function generatePlan(seedInput, progress = () => {}) {
     if (c.kind !== 'cave') continue;
     for (const ci of c.chambers) {
       const nd = c.nodes[ci];
-      sites.push({ x: nd.x, z: nd.z, y: floorNear(nd.x, nd.z, nd.y), layer: nd.y < LAYER_BOUNDARIES.layer2Top ? 2 : 1, context: 'deep inside a cave chamber', place: c.name, kind: 'cave' });
+      sites.push({ x: nd.x, z: nd.z, y: floorNear(nd.x, nd.z, nd.y), layer: nd.y < LAYER_BOUNDARIES.layer3Top ? 3 : nd.y < LAYER_BOUNDARIES.layer2Top ? 2 : 1, context: 'deep inside a cave chamber', place: c.name, kind: 'cave' });
     }
   }
   for (const sp of l1.spires) sites.push({ x: sp.x, z: sp.z, y: floorNear(sp.x, sp.z, sp.y + 1), layer: 1, context: 'atop a sheer rock spire', place: 'a rock spire near the Eye', kind: 'spire' });
   for (const cr of l2.crystals) sites.push({ x: cr.x + 2.5, z: cr.z, y: floorNear(cr.x + 2.5, cr.z, cr.y + 1), layer: 2, context: 'among glowing crystal growths', place: 'a crystal geode', kind: 'crystal' });
-  {
-    const t = fault.threshold;
-    sites.push({ x: t.x, z: t.z, y: t.y, layer: 3, context: 'beneath the arch of the Threshold', place: 'The Threshold', kind: 'threshold' });
-  }
+  for (const st of faultNet.sites) sites.push({ ...st, y: floorNear(st.x, st.z, st.y + 0.5) });
   for (const wf of waterfalls.filter((w) => w.kind === 'eye').slice(0, 3)) {
     const p = pools.find((pp) => Math.hypot(pp.x - wf.x, pp.z - wf.z) < 30 && pp.kind === 'plunge');
     if (p && Number.isFinite(p.level)) sites.push({ x: p.x + p.r + 2, z: p.z, y: floorNear(p.x + p.r + 2, p.z, p.level + 1), layer: 2, context: 'in the spray of a great waterfall', place: wf.name, kind: 'falls' });
@@ -752,7 +802,7 @@ export function generatePlan(seedInput, progress = () => {}) {
 
   Object.assign(plan, {
     names: { city: city.name },
-    caves: caves.map((c) => ({ id: c.id, kind: c.kind, name: c.name, entrance: c.entrance, exit: c.exit, walkable: !!c.walkable, from: c.from, to: c.to, nodes: c.nodes.length > 400 ? undefined : c.nodes })),
+    caves: caves.map((c) => ({ id: c.id, kind: c.kind, name: c.name, entrance: c.entrance, exit: c.exit, walkable: !!c.walkable, from: c.from, to: c.to, layer: c.layer, mat: c.mat || 0, nodes: c.nodes.length > 400 ? undefined : c.nodes })),
     city: {
       name: city.name, gates: city.gates, platforms: city.platforms, windmills: city.windmills, decor: city.decor,
       parks: city.parks, hamlets: city.hamlets, districts: city.districts, rings: city.rings, guild: city.guild, buildings: city.buildings,
@@ -762,7 +812,18 @@ export function generatePlan(seedInput, progress = () => {}) {
     waterfalls,
     spiral: { th0: spiral.th0, thEnd: spiral.thEnd, yStart: spiral.yStart, yEnd: spiral.yEnd, dir: spiral.dir, length: spiral.length },
     station,
-    threshold: fault.threshold,
+    fault: {
+      network: faultNet.network,
+      sinkholes: faultNet.sinkholes.map((sk) => ({ x: sk.x, y: sk.y, z: sk.z, name: sk.name, cave: sk.cave.id })),
+      halls: faultNet.hubs.map((h) => ({ x: h.x, y: h.fy, z: h.z, r: h.r, name: h.name, cave: h.cave ? h.cave.id : -1 })),
+      windows: faultNet.windows,
+      dens: faultNet.dens.map((d) => ({ x: d.x, y: d.y, z: d.z, r: d.r, crawl: d.crawl, name: d.name, cave: d.cave.id })),
+      shelves: faultNet.shelves,
+      basin: faultNet.basin,
+      exit: faultNet.exit,
+      gate: faultNet.gate,
+      ...chasmSites,
+    },
     journeys: journeys.map((r) => r.id),
     validation,
     artifacts,

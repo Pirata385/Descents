@@ -1,5 +1,6 @@
 // Exploration record for the maps. The world is rasterised at 4 m resolution
-// into three depth bands (surface + Layer 1, Layer 2, Layer 3); a cell is only
+// into depth bands (surface + Layer 1, Layer 2, three slices of the Great
+// Fault, and the entrance of Layer 4); a cell is only
 // stored once the explorer has been near it or has seen it. Nothing is
 // revealed automatically. Also records the travelled trail.
 import { WORLD_HALF_X, WORLD_HALF_Z } from '../world/params.js';
@@ -10,14 +11,20 @@ export const MAP_W = Math.ceil((WORLD_HALF_X * 2) / RES);
 export const MAP_H = Math.ceil((WORLD_HALF_Z * 2) / RES);
 export const X0 = -WORLD_HALF_X, Z0 = -WORLD_HALF_Z;
 export const BANDS = [
-  { id: 0, name: 'Surface & First Layer', top: 400, bottom: -345 },
-  { id: 1, name: 'Second Layer', top: -345, bottom: -895 },
-  { id: 2, name: 'Third Layer', top: -895, bottom: -3000 },
+  { id: 0, name: 'Surface & First Layer', short: 'Surface', top: 400, bottom: -345, layer: 1 },
+  { id: 1, name: 'Second Layer', short: 'Layer 2', top: -345, bottom: -895, layer: 2 },
+  { id: 2, name: 'Third Layer — upper fault', short: 'L3 upper', top: -895, bottom: -1230, layer: 3 },
+  { id: 3, name: 'Third Layer — middle fault', short: 'L3 middle', top: -1230, bottom: -1570, layer: 3 },
+  { id: 4, name: 'Third Layer — lower fault', short: 'L3 lower', top: -1570, bottom: -1895, layer: 3 },
+  { id: 5, name: 'Fourth Layer', short: 'Layer 4', top: -1895, bottom: -3000, layer: 4 },
 ];
 // cell flags
 export const F_EXPLORED = 1, F_WATER = 2, F_VOID = 4, F_ROUTE = 8, F_BUILDING = 16, F_CAVE = 32;
 
-export function bandOf(y) { return y > -345 ? 0 : y > -895 ? 1 : 2; }
+export function bandOf(y) {
+  for (let i = 0; i < BANDS.length - 1; i++) if (y > BANDS[i].bottom) return i;
+  return BANDS.length - 1;
+}
 
 export class MapData {
   constructor(game) {
