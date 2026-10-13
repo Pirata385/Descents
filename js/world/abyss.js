@@ -1,8 +1,8 @@
-// Macro planning for the shaft of the Abyss (end of Layer 1, Layer 2 and the
-// start of Layer 3): the Great Spiral ledge, gallery openings where the
-// spiral meets each inverted-forest tier, the buttress rib carrying the Long
-// Stair down to the Stone Plain, deep tunnels between tiers, and the fault
-// descent that leads to the Layer 3 threshold.
+// Macro planning for the shaft of the Abyss (end of Layer 1 and Layer 2):
+// the Great Spiral ledge, gallery openings where the spiral meets each
+// inverted-forest tier, the buttress rib carrying the Long Stair down to the
+// Stone Plain, and deep tunnels between tiers. The Great Fault below the
+// plain (Layer 3) is planned in chasm.js and faultcaves.js.
 import { RNG } from '../core/rng.js';
 import { TAU, wrapAngle, angle01 } from '../core/mathutil.js';
 import { helixTunnel, clearOfCaves } from './caves.js';
@@ -119,46 +119,6 @@ export function planLongStair(field, params, spiral, ribs, floorAt) {
     pts.push([ex, ez, yBottom, endTh]);
   }
   return { pts, yTop: spiral.yEnd, yBottom };
-}
-
-/** Fault descent: ledge spiralling down the fault wall to the Layer 3 threshold. */
-export function planFaultSpiral(field, params, entryX, entryZ, floorAt) {
-  const f = params.fault;
-  const FP = {};
-  const toWorld = (fr, fth) => {
-    // invert the fault warp by fixed-point iteration
-    let x = f.x + Math.cos(fth) * fr, z = f.z + Math.sin(fth) * fr;
-    for (let i = 0; i < 10; i++) {
-      const wx = field.nWarp.noise2(x / 70 + 50, z / 70) * 9;
-      const wz = field.nWarp.noise2(x / 70, z / 70 + 50) * 9;
-      x = f.x + Math.cos(fth) * fr - wx;
-      z = f.z + Math.sin(fth) * fr - wz;
-    }
-    return [x, z];
-  };
-  const startTh = Math.atan2(entryZ - f.z, entryX - f.x);
-  const RfAt = (th) => field.tab(field.faultTab, th);
-  const [sx, sz] = toWorld(RfAt(startTh) + 6, startTh);
-  const rimY = floorAt(sx, sz) ?? params.plainY;
-  const pts = [];
-  let th = startTh;
-  let y = rimY;
-  pts.push([sx, sz, y, th]);
-  const dir = RNG.derive(params.seed, 'fault').chance(0.5) ? 1 : -1;
-  const slope = 0.3;
-  const yEnd = f.thresholdY;
-  let guard = 0;
-  while (y > yEnd && guard++ < 5000) {
-    const R = RfAt(th) - 0.6;
-    th += (dir * 2) / R;
-    y = Math.max(yEnd, y - slope * 2);
-    const [x, z] = toWorld(RfAt(th) - 0.6, th);
-    pts.push([x, z, y, th]);
-  }
-  // threshold platform position: protruding into the fault
-  const [tx, tz] = toWorld(RfAt(th) - 6, th);
-  void FP;
-  return { pts, threshold: { x: tx, z: tz, y: yEnd, th }, dir, toWorld };
 }
 
 /**

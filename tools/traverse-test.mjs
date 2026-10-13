@@ -1,7 +1,9 @@
 // Physical traversal test: an autopilot walks the explorer (real player
 // physics: running, step-up, mantling, jumping when blocked) along every
-// guaranteed route from the city down to the Threshold of Layer 3.
-// usage: node tools/traverse-test.mjs [seed]
+// guaranteed route from the city down to the Stone Plain, then through the
+// cave network of the Great Fault, passage by passage, from the sinkhole in
+// the plain to the Fourth Gate at the entrance of Layer 4.
+// usage: node tools/traverse-test.mjs [seed]      (CAVES=0 skips the caves, CAVES=only walks only them, ROUTES=a,b walks only those routes)
 import { createRequire } from 'node:module';
 let chromium;
 try { ({ chromium } = await import('playwright')); } catch { ({ chromium } = createRequire('/opt/node22/lib/node_modules/')('playwright')); }
@@ -26,11 +28,11 @@ await page.evaluate(() => {
   g.player.on('death', () => { deaths++; });
   window.__deaths = () => deaths;
   /** Walk a route with the real controller. Returns progress statistics. */
-  window.__walk = (name, maxSeconds = 240) => {
-    const r = g.plan.routes.find((rr) => rr.name === name);
+  window.__walk = (name, maxSeconds = 240, ptsIn = null, keepPos = false) => {
+    const r = ptsIn ? { pts: ptsIn } : g.plan.routes.find((rr) => rr.name === name);
     if (!r) return { name, missing: true };
     const p = g.player, pts = r.pts, n = pts.length / 3;
-    p.pos.set(pts[0], pts[1] + 0.05, pts[2]); p.vel.set(0, 0, 0);
+    if (!keepPos || p.pos.distanceTo({ x: pts[0], y: pts[1], z: pts[2] }) > 6) { p.pos.set(pts[0], pts[1] + 0.05, pts[2]); p.vel.set(0, 0, 0); }
     p.safe = [p.pos.clone()]; p.mode = 'walk'; p.health = 100; p.stamina = 100;
     if (g.grapple.state !== 'idle') g.grapple.release(true);
     const d0 = deaths;
@@ -99,16 +101,116 @@ const routes = await page.evaluate(() => {
   const pick = (re) => names.filter((n) => re.test(n));
   return [...pick(/Stairway$/).slice(0, 2), "Delvers' Road", 'River Trail', 'Cavern Way', 'Ridge Trail', 'Lip Approach', 'Throat Trail', 'The Great Spiral', ...pick(/Trail I+$/).slice(0, 2), 'The Long Stair', 'Plain Trail', 'Threshold Descent'].filter((n) => names.includes(n));
 });
+// the Great Fault: the shortest chain of walkable passages from the plain to Layer 4
+await page.evaluate(() => {
+  const g = window.__descents, plan = g.plan, W = g.world;
+  const caves = plan.caves.filter((c) => c.layer === 3 && c.walkable && c.to !== 'chasm' && c.from && c.to);
+  const adj = new Map();
+  const link = (a, b, c, rev) => { if (!adj.has(a)) adj.set(a, []); adj.get(a).push({ to: b, c, rev }); };
+  for (const c of caves) { link(c.from, c.to, c, false); link(c.to, c.from, c, true); }
+  const len = (c) => { let L = 0; for (let i = 1; i < c.nodes.length; i++) L += Math.hypot(c.nodes[i].x - c.nodes[i - 1].x, c.nodes[i].y - c.nodes[i - 1].y, c.nodes[i].z - c.nodes[i - 1].z); return L; };
+  // Dijkstra by passage length
+  const dist = new Map([['plain', 0]]), prev = new Map(), open = ['plain'];
+  while (open.length) {
+    open.sort((a, b) => dist.get(a) - dist.get(b));
+    const u = open.shift();
+    if (u === 'layer4') break;
+    for (const e of adj.get(u) || []) {
+      const d = dist.get(u) + len(e.c);
+      if (d < (dist.get(e.to) ?? Infinity)) { dist.set(e.to, d); prev.set(e.to, { from: u, e }); if (!open.includes(e.to)) open.push(e.to); }
+    }
+  }
+  const chain = [];
+  for (let v = 'layer4'; prev.has(v); v = prev.get(v).from) chain.unshift(prev.get(v).e);
+  // each passage becomes a dense line of floor points; the next one starts where it ends
+  window.__caveLegs = chain.map((e, i) => {
+    const nodes = e.rev ? [...e.c.nodes].reverse() : e.c.nodes;
+    const pts = [];
+    const push = (x, y, z) => { const f = W.floorBelow(x, y + 0.6, z); pts.push(x, Number.isFinite(f) && y - f < 12 ? f : y, z); };
+    // cross the hall (or the Basin) from the end of the previous passage, picking a
+    // line over the uneven floor as a person would: A* on a 1 m grid, steps up to 1.4 m
+    if (i > 0) {
+      const pn = chain[i - 1].rev ? chain[i - 1].c.nodes[0] : chain[i - 1].c.nodes[chain[i - 1].c.nodes.length - 1];
+      const q = nodes[0];
+      const M = 14, x0 = Math.min(pn.x, q.x) - M, z0 = Math.min(pn.z, q.z) - M;
+      const NX = Math.ceil(Math.abs(pn.x - q.x) + 2 * M), NZ = Math.ceil(Math.abs(pn.z - q.z) + 2 * M);
+      const yRef = (u, v) => pn.y + (q.y - pn.y) * Math.min(1, Math.max(0, ((x0 + u - pn.x) * (q.x - pn.x) + (z0 + v - pn.z) * (q.z - pn.z)) / Math.max(1, (q.x - pn.x) ** 2 + (q.z - pn.z) ** 2)));
+      const H = new Float32Array(NX * NZ);
+      for (let v = 0; v < NZ; v++) for (let u = 0; u < NX; u++) {
+        const f = W.floorBelow(x0 + u, yRef(u, v) + 3, z0 + v);
+        const c = W.ceilingAbove(x0 + u, f + 0.1, z0 + v);
+        H[v * NX + u] = Number.isFinite(f) && c - f > 2 ? f : NaN;
+      }
+      const id = (u, v) => v * NX + u;
+      const s0 = id(Math.round(pn.x - x0), Math.round(pn.z - z0)), g0 = id(Math.round(q.x - x0), Math.round(q.z - z0));
+      const cost = new Float32Array(NX * NZ).fill(Infinity), from = new Int32Array(NX * NZ).fill(-1), done = new Uint8Array(NX * NZ);
+      cost[s0] = 0;
+      const open = [s0];
+      while (open.length) {
+        let bi = 0;
+        for (let k = 1; k < open.length; k++) if (cost[open[k]] + Math.hypot(open[k] % NX - g0 % NX, ((open[k] / NX) | 0) - ((g0 / NX) | 0)) < cost[open[bi]] + Math.hypot(open[bi] % NX - g0 % NX, ((open[bi] / NX) | 0) - ((g0 / NX) | 0))) bi = k;
+        const cur = open.splice(bi, 1)[0];
+        if (cur === g0) break;
+        if (done[cur]) continue;
+        done[cur] = 1;
+        const cu = cur % NX, cv = (cur / NX) | 0;
+        for (const [du, dv] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+          const nu = cu + du, nv = cv + dv;
+          if (nu < 0 || nv < 0 || nu >= NX || nv >= NZ) continue;
+          const nb = id(nu, nv);
+          if (done[nb] || Number.isNaN(H[nb]) || Number.isNaN(H[cur])) continue;
+          const dh = H[nb] - H[cur];
+          if (dh > 1.4 || dh < -4) continue;
+          const c2 = cost[cur] + Math.hypot(du, dv) + Math.max(0, dh) * 0.5;
+          if (c2 < cost[nb]) { cost[nb] = c2; from[nb] = cur; open.push(nb); }
+        }
+      }
+      const cells = [];
+      if (from[g0] >= 0) for (let k = g0; k >= 0; k = from[k]) cells.unshift(k);
+      if (cells.length) for (const k of cells) push(x0 + (k % NX), H[k] + 0.5, z0 + ((k / NX) | 0));
+      else {
+        const st = Math.max(1, Math.ceil(Math.hypot(q.x - pn.x, q.z - pn.z) / 0.8));
+        for (let k = 0; k < st; k++) { const t = k / st; push(pn.x + (q.x - pn.x) * t, pn.y + (q.y - pn.y) * t, pn.z + (q.z - pn.z) * t); }
+      }
+    }
+    for (let k = 1; k < nodes.length; k++) {
+      const a = nodes[k - 1], b = nodes[k];
+      const st = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) / 0.8));
+      for (let j = 0; j < st; j++) { const t = j / st; push(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t - b.r * 0.2, a.z + (b.z - a.z) * t); }
+    }
+    const z = nodes[nodes.length - 1];
+    push(z.x, z.y, z.z);
+    return { name: `${e.c.name || e.c.kind} (${e.rev ? e.c.to : e.c.from} → ${e.rev ? e.c.from : e.c.to})`, pts };
+  });
+});
 const only = process.env.ROUTES ? process.env.ROUTES.split(',').map((x) => x.trim()) : null;
 let ok = true;
 for (const name of routes) {
-  if (only && !only.includes(name)) continue;
+  if ((only && !only.includes(name)) || process.env.CAVES === 'only') continue;
   const res = await page.evaluate(([n]) => window.__walk(n, 420), [name]);
   const pass = res.progress > 0.97 && res.deaths === 0;
   const st = await page.evaluate(() => { const s2 = window.__stuck; window.__stuck = null; return s2; });
   if (!pass && st) console.log('     stuck:', JSON.stringify(st));
   if (!pass) ok = false;
   console.log(`${pass ? 'OK  ' : 'FAIL'} ${JSON.stringify(res)}`);
+}
+if (process.env.CAVES !== '0' && !only) {
+  const legs = await page.evaluate(() => window.__caveLegs.map((l) => l.name));
+  console.log(`The Great Fault: ${legs.length} passages from the plain to the Fourth Gate`);
+  let keep = false;
+  const drop = await page.evaluate(() => Math.round(window.__caveLegs[0].pts[1]));
+  for (let i = 0; i < legs.length; i++) {
+    const res = await page.evaluate(([i, keep]) => { const L = window.__caveLegs[i]; return window.__walk(L.name, 300, L.pts, keep); }, [i, keep]);
+    const pass = res.progress > 0.97 && res.deaths === 0;
+    const st = await page.evaluate(() => { const s2 = window.__stuck; window.__stuck = null; return s2; });
+    if (!pass && st) console.log('     stuck:', JSON.stringify(st));
+    if (!pass) ok = false;
+    // a passage that fails is reported; the walk resumes at the start of the next one
+    keep = pass;
+    console.log(`${pass ? 'OK  ' : 'FAIL'} ${JSON.stringify(res)}`);
+  }
+  const end = await page.evaluate(() => { const p = window.__descents.player.pos; return { y: Math.round(p.y), layer: window.__descents.layerInfo.layer }; });
+  console.log(`reached depth ${-end.y} m (layer ${end.layer}) after starting the caves at ${-drop} m`);
 }
 if (errors.length) { ok = false; console.log('page errors:', errors.slice(0, 5)); }
 console.log(ok ? 'All routes walked.' : 'Some routes could not be walked.');

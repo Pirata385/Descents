@@ -26,9 +26,14 @@ function namedPose(g, loc) {
       const [tx, tz] = f.fromPolar(eyeR(w.th) + 90, w.th + 0.25);
       return look(x, y, z, tx, y + 10, tz);
     }
-    case 'plain': { const t = plan.threshold; const [x, z] = [t.x * 2.2, t.z * 2.2]; const y = floor(x, z, p.plainY + 30) + 1.7; return look(x, y, z, t.x, y - 10, t.z); }
-    case 'fault': { const t = plan.threshold; return look(t.x, t.y + 1.7, t.z, p.fault.x, t.y - 30, p.fault.z); }
-    case 'up': { const t = plan.threshold; const [x, z] = [t.x * 1.6, t.z * 1.6]; const y = floor(x, z, p.plainY + 30) + 1.7; return { x, y, z, yaw: 0, pitch: 1.2 }; }
+    case 'plain': { const sk = plan.fault.sinkholes[0]; const [x, z] = [sk.x + (p.fault.x - sk.x) * -0.4, sk.z + (p.fault.z - sk.z) * -0.4]; const y = floor(x, z, p.plainY + 30) + 1.7; return look(x, y, z, sk.x, y - 6, sk.z); }
+    case 'fault': { const w = plan.fault.windows[0] || plan.fault.halls[1]; return look(w.x, w.y + 1.7, w.z, p.fault.x, w.y - 60, p.fault.z); }
+    case 'sinkhole': { const sk = plan.fault.sinkholes[0]; return look(sk.x + 12, sk.y + 4, sk.z, sk.x, sk.y - 3, sk.z); }
+    case 'hall': { const h = plan.fault.halls[Number(params.get('i') || 1)]; return look(h.x, h.y + 1.7, h.z, h.x + 5, h.y + 1, h.z + 5); }
+    case 'basin': { const e = plan.fault.exit; const b = plan.fault.basin; return look(e.x, e.y + 1.7, e.z, b.x, b.y + 10, b.z); }
+    case 'gate': { const gt = plan.fault.gate.mouth; const b = plan.fault.basin; return look(gt.x + (b.x - gt.x) * 0.15, gt.y + 2.5, gt.z + (b.z - gt.z) * 0.15, gt.x, gt.y + 6, gt.z); }
+    case 'up': { const sk = plan.fault.halls[0]; const [cx, cz] = [p.fault.x, p.fault.z]; const y = p.chasm.yWide - 40; return { x: cx + (sk.x - cx) * 0.2, y, z: cz + (sk.z - cz) * 0.2, yaw: 0, pitch: 1.2 }; }
+    case 'chasm': { const y = Number(params.get('y') || -1300); const [cx, cz] = [p.fault.x, p.fault.z]; return look(cx, y, cz, cx + 100, y - 60, cz); }
     default: return { x: plan.spawn.x, y: plan.spawn.y + 1.7, z: plan.spawn.z, yaw: plan.spawn.yaw, pitch: -0.1 };
   }
 }

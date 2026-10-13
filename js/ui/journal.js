@@ -2,7 +2,8 @@
 // the expedition log. Everything shown here comes from the discovery record.
 import { TopDownMap, VerticalMap } from './maps.js';
 import { Preview } from './preview.js';
-import { FAMILY_LABEL, describeAppearance, DIET_TEXT, LOCO_TEXT } from '../creatures/genetics.js';
+import { FAMILY_LABEL, describeAppearance, DIET_TEXT, LOCO_TEXT, NICHE_LABEL, G } from '../creatures/genome.js';
+import { typicalPhenotype } from '../creatures/anatomy.js';
 import { CATEGORY_LABEL, GRADES, describeEffect, describeAbility, describeDrawback } from '../artifacts/artifactGen.js';
 import { LAYERS } from '../world/layers.js';
 import { FACT_TIMES, FULL_OBSERVATION } from '../systems/discovery.js';
@@ -113,12 +114,13 @@ export class Journal {
   renderSpeciesDetail(sp, e) {
     const det = this.body.querySelector('.cat-detail');
     const has = (k) => e.facts.has(k);
-    const b = sp.behavior, m = sp.morph;
+    const b = sp.behavior, m = sp.genome.mean;
+    const tp = typicalPhenotype(sp);
     const lock = (k) => `<span class="locked">Observe longer to learn this (${Math.max(0, Math.ceil(FACT_TIMES[k] - e.observe))} s)</span>`;
     const pct = Math.min(100, Math.round((e.observe / FULL_OBSERVATION) * 100));
-    const sizeText = e.maxSize ? `${e.minSize.toFixed(1)} – ${e.maxSize.toFixed(1)} m observed` : `${m.size.toFixed(1)} m`;
+    const sizeText = e.maxSize ? `${e.minSize.toFixed(1)} – ${e.maxSize.toFixed(1)} m observed` : `${sp.size.toFixed(1)} m`;
     const traits = [
-      ['Speed', b.speed.run / 12], ['Perception', b.perception / 60], ['Strength', Math.min(1, b.strength / 6)], ['Aggression', b.aggression], ['Wariness', b.fearfulness],
+      ['Speed', Math.max(tp.stats.run, tp.stats.fly) / 12], ['Perception', tp.stats.perception / 60], ['Agility', m[G.agility]], ['Aggression', m[G.aggression]], ['Wariness', 1 - m[G.boldness]], ['Sociality', m[G.sociality]], ['Curiosity', m[G.curiosity]],
     ].map(([k, v]) => `<div class="trait"><span>${k}</span><div class="bar"><i style="width:${Math.round(Math.min(1, v) * 100)}%"></i></div></div>`).join('');
     const social = { solitary: 'Solitary', pair: 'Lives in pairs', group: 'Small groups', herd: 'Herds', flock: 'Flocks', swarm: 'Swarms', colony: 'Colonies', pack: 'Hunts in packs', family: 'Family groups' }[b.social] || b.social;
     const act = { diurnal: 'Active by day', nocturnal: 'Active at night', crepuscular: 'Active at dawn and dusk', cathemeral: 'Active at all hours' }[b.activity];
@@ -145,7 +147,9 @@ export class Journal {
           <h4>Traits</h4>
           ${has('traits') ? traits : lock('traits')}
           <div class="kv"><span>Size</span><b>${has('size') ? sizeText : '?'}</b></div>
-          ${has('reproduction') ? `<div class="kv"><span>Offspring</span><b>${b.reproduction.litter > 1 ? `litters of up to ${b.reproduction.litter}` : 'one at a time'}${b.reproduction.care === 'none' ? ', left to fend for themselves' : ', cared for by a parent'}</b></div>` : ''}
+          ${has('reproduction') ? `<div class="kv"><span>Offspring</span><b>${b.reproduction.eggs ? `clutches of ${b.reproduction.clutch} egg${b.reproduction.clutch > 1 ? 's' : ''}` : b.reproduction.clutch > 1 ? `litters of up to ${b.reproduction.clutch}` : 'one at a time'}${b.reproduction.care === 'none' ? ', left to fend for themselves' : b.reproduction.care === 'nest' ? ', raised at the nest' : ', cared for by a parent'}</b></div>` : ''}
+          <div class="kv"><span>Niche</span><b>${esc(NICHE_LABEL[sp.niche] || sp.niche)}</b></div>
+          <div class="kv"><span>Regional forms</span><b>${sp.subspecies.map((f, i) => (e.subspecies && e.subspecies.has(i) ? esc(f.name) : '?')).join(', ')}</b></div>
           ${e.juveniles ? '<div class="kv"><span>Young</span><b>Juveniles observed</b></div>' : ''}
           ${e.call ? `<div class="kv"><span>Call</span><b>A ${esc(sp.call.type)}</b></div>` : ''}
         </div>
@@ -155,7 +159,7 @@ export class Journal {
         </div>
       </div>`;
     const pv = this.getPreview();
-    if (pv) { pv.attach(det.querySelector('.preview-box')); pv.showSpecies(sp, this.game.ecosystem?.templates); }
+    if (pv) { pv.attach(det.querySelector('.preview-box')); pv.showSpecies(sp); }
   }
 
   // ------------------------------------------------------------------ artifacts

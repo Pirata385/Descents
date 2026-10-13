@@ -1,222 +1,117 @@
 // Ecosystem simulation.
-// - The world is divided into 64 m regions per vertical band (surface/Layer 1,
-//   each Layer 2 gallery tier, the Stone Plain, the shaft air, Layer 3).
-// - Every region the simulation has touched keeps abstract populations per
-//   species that grow, compete, prey and migrate whether or not the player is near.
-// - Regions near the player are materialised into individual agents with
-//   genomes, needs and behaviours (forage, hunt, flee, mate, raise offspring,
-//   defend territory, follow hosts, flock, rest by activity cycle, migrate).
-// - Interactions are emitted as events so the discovery system can record
-//   what the player actually witnessed.
+// - Abstract populations per species live in 64 m regions per band (the
+//   surface, each Layer 2 tier, the plain, the shaft air, the Layer 3 caves,
+//   the chasm by depth). They grow, compete, prey and recover whether or not
+//   the explorer is near, and keep a small gene pool that drifts as
+//   individuals breed.
+// - Near the explorer, populations become individuals: each with its own
+//   genes (drawn from the regional pool and its subspecies), anatomy, mesh,
+//   animation, needs and temperament.
+// - Individuals move in their habitat (ground, cave network, chasm walls,
+//   open air, ceilings, roosts and nests) and act on decisions from brain.js:
+//   flee, hunt and kill, forage, scavenge, sleep at home, court and mate, lay
+//   eggs or give birth, raise young, flock, mob predators, defend territory,
+//   follow hosts, investigate the explorer.
+// - Interactions are emitted as events for discovery, audio and the HUD.
 import * as THREE from 'three';
-import { RNG, hash32 } from '../core/rng.js';
-import { clamp, lerp, wrapAngle } from '../core/mathutil.js';
-import { M, isGrassy } from '../world/materials.js';
-import { CF } from '../world/column.js';
-import { Z_BOWL, Z_CITY, Z_COUNTRY, Z_SEA, Z_EYE } from '../world/field.js';
-import { individualGenes, inheritGenes } from './genetics.js';
-import { buildSpeciesModel, createCreatureObject } from './creatureMesh.js';
-import { animateCreature } from './animation.js';
+import { RNG } from '../core/rng.js';
+import { clamp, lerp } from '../core/mathutil.js';
+import { G, individualGenes, inheritGenes, subspeciesAt } from './genome.js';
+import { phenotype, juvenilize } from './anatomy.js';
+import { buildCreature } from './bodyMesh.js';
+import { Animator } from './motion.js';
+import { decide, ACTION_LABEL } from './brain.js';
+import { Habitats, BAND } from './habitat.js';
+import { Z_CITY } from '../world/field.js';
 
 const RS = 64;              // region size (m)
-const ACTIVE_R = 150;       // materialise radius
-const DROP_R = 210;         // dematerialise radius
-const MAX_AGENTS = 120;
-const BANDS = { SURF: 0, G0: 1, G1: 2, G2: 3, PLAIN: 4, FAULT: 5, SHAFT: 6 };
+const ACTIVE_R = 120;       // populations within this radius are materialised
+const DROP_R = 175;         // individuals beyond this are folded back into the population
+const VIS_R = 150;          // render distance
+const POOL = 6;             // genomes kept per species and region
 
-const FOOD_MATS = {
-  graze: new Set([M.GRASS, M.MEADOW, M.MOSS, M.LITTER, M.FIELD]),
-  mineral: new Set([M.ROCK, M.GRAVEL, M.STONEPLAIN, M.CRYSTAL, M.DARKROCK, M.SHAFTROCK, M.BASALT, M.RUIN, M.RUIN2]),
-};
+const UP = new THREE.Vector3(0, 1, 0);
+const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _lv = new THREE.Vector3(), _m = new THREE.Matrix4(), _q = new THREE.Quaternion();
 
 export class Ecosystem {
-  constructor(game) {
+  constructor(game, opts = {}) {
     this.game = game;
     this.world = game.world;
     this.plan = game.plan;
     this.species = game.plan.species;
-    this.scene = game.renderer.scene;
-    this.regions = new Map();   // key -> {key, band, i, j, pops: Float32Array, K: Float32Array, active, init}
+    this.scene = game.renderer ? game.renderer.scene : null;
+    this.hab = new Habitats(game);
+    this.maxAgents = opts.maxAgents ?? (game.settings && game.settings.creatures) ?? 60;
+    this.regions = new Map();
     this.agents = [];
     this.carcasses = [];
-    this.templates = new Map();
     this.listeners = [];
     this.nextId = 1;
     this.tickTimer = 0;
     this.activationTimer = 0;
-    this.thinkIndex = 0;
+    this.buildQueue = [];
     this.group = new THREE.Group();
-    this.scene.add(this.group);
-    this.stats = { births: 0, deaths: 0, kills: 0 };
-    this.sp = this.species.map((s) => this.prepareSpecies(s));
-    this._v = new THREE.Vector3();
+    if (this.scene) this.scene.add(this.group);
+    this.stats = { births: 0, deaths: 0, kills: 0, spawned: 0, despawned: 0 };
+    this.sp = this.species.map((s) => this.prepare(s));
+    this.grid = new Map();
+    this.groups = new Map();
+    this.playerAgent = { id: -1, sp: { id: -1, name: 'explorer', behavior: { diet: 'omnivore' } }, pos: new THREE.Vector3(), dead: false, ph: { scale: 1.8 } };
+    this.attractors = [];
+    this.hour = 9;
+    this.dark = false;
+    this.lampOn = false;
   }
 
   on(fn) { this.listeners.push(fn); }
   emit(type, data) { for (const fn of this.listeners) fn(type, data); }
 
-  prepareSpecies(s) {
-    const size = s.morph.size;
-    const social = s.behavior.social;
-    let cap = 3 / Math.max(0.4, size);
-    if (s.behavior.diet === 'carnivore') cap *= size > 2 ? 0.12 : 0.35;
-    if (social === 'herd' || social === 'flock' || social === 'swarm' || social === 'colony') cap *= 2.2;
-    if (s.behavior.playerAware) cap = 0.6;
-    const bands = [];
-    const hab = s.behavior.habitat;
-    if (s.layer === 'surface' || s.layer === 'layer1') bands.push(BANDS.SURF);
-    if (s.layer === 'layer2') {
-      if (hab.includes('ceiling') || hab.includes('forest') || hab.includes('litter') || hab.includes('shrubs') || hab.includes('meadow') || hab.includes('plains')) bands.push(BANDS.G0, BANDS.G1, BANDS.G2);
-      if (hab.includes('plain') || hab.includes('rocky') || hab.includes('plains') || hab.includes('caves')) bands.push(BANDS.PLAIN);
-      if (hab.includes('cliffs') || hab.includes('air')) bands.push(BANDS.SHAFT, BANDS.PLAIN);
-      if (!bands.length) bands.push(BANDS.G0, BANDS.PLAIN);
-    }
-    if (s.layer === 'layer3') bands.push(BANDS.FAULT);
-    return { s, cap: clamp(cap, 0.3, 14), bands, rng: RNG.derive(this.plan.seed, 'eco', s.id) };
+  prepare(s) {
+    const size = s.size, B = s.behavior;
+    // carrying capacity per region at full suitability
+    let cap = 3.2 / Math.max(0.35, size);
+    if (B.diet === 'carnivore') cap *= size > 2 ? 0.12 : 0.35;
+    if (['herd', 'flock', 'swarm', 'colony'].includes(B.social)) cap *= 2.2;
+    if (B.playerAware) cap = 0.5;
+    if (s.layer === 'layer3') cap *= B.habitat === 'cave' ? 1.4 : 1.6;
+    return { s, cap: clamp(cap, 0.3, 16), bands: this.hab.bandsFor(s), rng: RNG.derive(this.plan.seed, 'eco', s.id) };
   }
 
   // ------------------------------------------------------------------ regions
-  bandAt(y, zone) {
-    const p = this.plan.params;
-    if (y > -350) return BANDS.SURF;
-    if (y < -905) return BANDS.FAULT;
-    if (y < p.plainY + 70) return BANDS.PLAIN;
-    for (let k = 0; k < p.galleries.length; k++) {
-      const g = p.galleries[k];
-      if (y < g.yTop + 8 && y > g.yTop - g.height - 25) return BANDS.G0 + k;
-    }
-    void zone;
-    return BANDS.SHAFT;
+  regionKey(band, x, y, z) {
+    const i = Math.floor(x / RS), j = Math.floor(z / RS);
+    const slice = band === BAND.CAVE3 || band === BAND.CHASM ? Math.floor((this.plan.params.plainY - y) / 160) : 0;
+    return `${band}:${i}:${j}:${slice}`;
   }
 
-  regionKey(band, i, j) { return `${band}:${i}:${j}`; }
-
-  getRegion(band, i, j) {
-    const key = this.regionKey(band, i, j);
+  /** The region for a key, created on first use; null if creating it would overrun `deadline`. */
+  region(key, x, y, z, band, deadline = Infinity) {
     let r = this.regions.get(key);
+    if (r && r.init) return r;
+    if (performance.now() > deadline) return null;
     if (!r) {
-      r = { key, band, i, j, pops: new Float32Array(this.species.length), K: new Float32Array(this.species.length), active: false, init: false, agents: 0 };
+      r = { key, band, x: (Math.floor(x / RS) + 0.5) * RS, y, z: (Math.floor(z / RS) + 0.5) * RS, pops: new Float32Array(this.species.length), K: new Float32Array(this.species.length), pools: [], init: false, active: false };
       this.regions.set(key, r);
     }
+    this.initRegion(r);
     return r;
   }
 
-  /** Determine carrying capacities by sampling habitat inside the region. */
   initRegion(r) {
-    if (r.init) return;
     r.init = true;
-    const rng = RNG.derive(this.plan.seed, 'region', r.band, r.i * 7919 + r.j);
+    const rng = RNG.derive(this.plan.seed, 'region', r.key);
     for (let si = 0; si < this.sp.length; si++) {
       const S = this.sp[si];
       if (!S.bands.includes(r.band)) continue;
       let ok = 0;
-      const n = 6;
-      for (let k = 0; k < n; k++) {
-        const x = (r.i + rng.next()) * RS, z = (r.j + rng.next()) * RS;
-        if (this.habitatPoint(S, x, z, r.band)) ok++;
-      }
-      const suit = ok / n;
-      r.K[si] = suit * S.cap;
+      const n = 5;
+      for (let k = 0; k < n; k++) if (this.hab.sample(S.s, rng, r.x, r.y, r.z, RS * 0.7)) ok++;
+      r.K[si] = (ok / n) * S.cap;
       r.pops[si] = r.K[si] * rng.range(0.5, 1.0);
     }
   }
 
-  /**
-   * Find a valid habitat position for species S at (x, z) in a band.
-   * Returns {x, y, z, ceil} or null.
-   */
-  habitatPoint(S, x, z, band) {
-    const s = S.s;
-    const W = this.world;
-    const info = W.field.polar(x, z, this._P || (this._P = {}));
-    const zone = info.zone;
-    const hab = s.behavior.habitat;
-    const loco = s.behavior.locomotion;
-    const c = W.columnAt(x, z);
-    const fly = loco === 'fly' || loco === 'glide';
-    const p = this.plan.params;
-    // pick a floor in the band
-    let floor = null, floorMat = 0, ceil = Infinity;
-    for (let k = c.n - 1; k >= 0; k--) {
-      const top = c.y[(c.off + k) * 2 + 1];
-      const above = k + 1 < c.n ? c.y[(c.off + k + 1) * 2] : Infinity;
-      if (above - top < 2.5) continue;
-      if (this.bandAt(top + 1, zone) !== band && !(band === BANDS.SHAFT && fly)) continue;
-      floor = top; floorMat = c.mat[(c.off + k) * 2]; ceil = above;
-      break;
-    }
-    if (band === BANDS.SHAFT) {
-      if (!fly) return null;
-      if (info.r > info.Re + 5) return null;
-      const y = p.lipY - 60 - ((hash32(x | 0, z | 0) % 1000) / 1000) * 400;
-      return { x, y, z, air: true };
-    }
-    if (floor === null) return null;
-    if (!Number.isNaN(c.water) && Math.abs(c.water - floor) < 3 && !hab.includes('water')) return null;
-    if (s.layer === 'surface' && zone !== Z_CITY && zone !== Z_COUNTRY) return null;
-    if (s.layer === 'layer1' && zone !== Z_BOWL) return null;
-    if (zone === Z_SEA || zone === Z_EYE && band === BANDS.SURF) return null;
-    if (hab.includes('ceiling')) {
-      if (!(ceil < Infinity) || ceil - floor < 6) return null;
-      return { x, y: ceil, z, ceil: true };
-    }
-    if (hab.includes('water')) {
-      if (Number.isNaN(c.water) && !this.nearWater(x, z)) return null;
-    }
-    const diet = s.behavior.diet;
-    if ((diet === 'grazer' || diet === 'browser') && !FOOD_MATS.graze.has(floorMat)) return null;
-    if (diet === 'lithophage' && !FOOD_MATS.mineral.has(floorMat)) return null;
-    if (hab.includes('city') && s.layer === 'surface' && (c.flags & (CF.BUILDING | CF.ROUTE | CF.PARK)) === 0 && zone !== Z_CITY) return null;
-    if (fly) return { x, y: floor + 6 + ((hash32(x | 0, z | 0, 3) % 100) / 100) * 18, z, air: true, floor };
-    return { x, y: floor, z };
-  }
-
-  nearWater(x, z) {
-    for (let k = 0; k < 6; k++) {
-      const a = k * 1.047;
-      const c = this.world.columnAt(x + Math.cos(a) * 6, z + Math.sin(a) * 6);
-      if (!Number.isNaN(c.water)) return true;
-    }
-    return false;
-  }
-
-  // ------------------------------------------------------------------ update
-  update(dt) {
-    const player = this.game.player;
-    if (!player) return;
-    const t = this.game.gameTime;
-    this.tickTimer -= dt;
-    if (this.tickTimer <= 0) { this.tickTimer = 5; this.abstractTick(5); }
-    this.activationTimer -= dt;
-    if (this.activationTimer <= 0) { this.activationTimer = 1.0; this.updateActivation(player.pos); }
-    // think a slice of agents each frame (~10 Hz each)
-    const n = this.agents.length;
-    const slice = Math.max(1, Math.ceil(n / 6));
-    for (let k = 0; k < slice && n; k++) {
-      this.thinkIndex = (this.thinkIndex + 1) % n;
-      const a = this.agents[this.thinkIndex];
-      if (a) this.think(a, t);
-    }
-    const cam = this.game.camera.position;
-    for (const a of this.agents) {
-      this.move(a, dt, t);
-      const d2 = (a.pos.x - cam.x) ** 2 + (a.pos.z - cam.z) ** 2;
-      a.obj.mesh.visible = d2 < 260 * 260 && !a.dead;
-      if (a.obj.mesh.visible && (d2 < 90 * 90 || ((t * 10) | 0) % 3 === a.id % 3)) animateCreature(a, this.templates.get(a.sp.id), dt, t);
-      a.calling = Math.max(0, a.calling - dt);
-      a.strike = Math.max(0, (a.strike || 0) - dt);
-    }
-    // carcasses decay
-    for (const c of this.carcasses) c.time -= dt;
-    this.carcasses = this.carcasses.filter((c) => c.time > 0 && c.meat > 0);
-    // remove dead agents
-    if (this.agents.some((a) => a.dead)) {
-      for (const a of this.agents) if (a.dead) this.disposeAgent(a);
-      this.agents = this.agents.filter((a) => !a.dead);
-    }
-  }
-
-  /** Abstract population dynamics for all touched regions. */
+  /** Abstract population dynamics for regions away from the explorer. */
   abstractTick(dt) {
     const sps = this.species;
     for (const r of this.regions.values()) {
@@ -225,9 +120,8 @@ export class Ecosystem {
         const K = r.K[si];
         if (K <= 0) continue;
         let p = r.pops[si];
-        const rate = 0.004 / Math.max(0.4, sps[si].morph.size);
+        const rate = 0.004 / Math.max(0.35, sps[si].size);
         p += rate * p * (1 - p / K) * dt + (p < 0.05 ? 0.002 * dt * K : 0);
-        // predation: prey availability feeds predators
         const prey = sps[si].relations.prey;
         if (prey.length) {
           let food = 0;
@@ -241,607 +135,874 @@ export class Ecosystem {
     }
   }
 
-  updateActivation(ppos) {
-    const band = this.bandAt(ppos.y, null);
-    const bandsNear = new Set([band]);
-    // nearby vertical bands are also simulated so creatures above/below stay alive
-    for (const dy of [-60, 60, -120, 120]) bandsNear.add(this.bandAt(ppos.y + dy, null));
-    if (band !== BANDS.SURF && band !== BANDS.FAULT) bandsNear.add(BANDS.SHAFT);
-    const ci = Math.floor(ppos.x / RS), cj = Math.floor(ppos.z / RS);
-    const rr = Math.ceil(DROP_R / RS) + 1;
-    const want = new Set();
-    for (let dj = -rr; dj <= rr; dj++) for (let di = -rr; di <= rr; di++) {
-      const i = ci + di, j = cj + dj;
-      const cx = (i + 0.5) * RS, cz = (j + 0.5) * RS;
-      const d = Math.hypot(cx - ppos.x, cz - ppos.z);
-      for (const b of bandsNear) {
-        const key = this.regionKey(b, i, j);
-        if (d < ACTIVE_R) want.add(key);
-        else if (d < DROP_R) { const r = this.regions.get(key); if (r && r.active) want.add(key); }
-      }
-    }
-    // deactivate regions no longer wanted, and free their agents right away
-    for (const r of this.regions.values()) if (r.active && !want.has(r.key)) this.deactivate(r);
-    if (this.agents.some((a) => a.dead)) {
-      for (const a of this.agents) if (a.dead) this.disposeAgent(a);
-      this.agents = this.agents.filter((a) => !a.dead);
-    }
-    // activate new ones (nearest first)
-    const list = [...want].map((k) => { const [b, i, j] = k.split(':').map(Number); return { b, i, j, d: Math.hypot((i + 0.5) * RS - ppos.x, (j + 0.5) * RS - ppos.z) }; }).sort((a, b) => a.d - b.d);
-    for (const it of list) {
-      const r = this.getRegion(it.b, it.i, it.j);
-      if (r.active) continue;
-      if (this.agents.length >= MAX_AGENTS) break;
-      this.activate(r);
-    }
-  }
-
-  activate(r) {
-    this.initRegion(r);
-    r.active = true;
-    const rng = RNG.derive(this.plan.seed, 'spawn', r.band, r.i * 7919 + r.j, Math.floor(this.game.gameTime / 600));
-    for (let si = 0; si < this.sp.length; si++) {
-      const S = this.sp[si];
-      let count = Math.round(r.pops[si] + rng.range(-0.3, 0.3));
-      // the lone hunters of the Fault: one per suitable region
-      if (S.s.behavior.playerAware) count = r.pops[si] > 0.15 ? 1 : 0;
-      if (count <= 0) continue;
-      const room = MAX_AGENTS - this.agents.length;
-      count = Math.min(count, room, 14);
-      if (count <= 0) break;
-      // groups spawn around a centre
-      let cx = (r.i + rng.next()) * RS, cz = (r.j + rng.next()) * RS;
-      const groupId = this.nextId++;
-      let made = 0;
-      for (let tries = 0; made < count && tries < count * 8; tries++) {
-        const spread = S.s.behavior.groupSize[1] > 2 ? 10 : RS * 0.5;
-        const x = cx + rng.range(-spread, spread), z = cz + rng.range(-spread, spread);
-        const hp = this.habitatPoint(S, x, z, r.band);
-        if (!hp) { if (tries % 4 === 3) { cx = (r.i + rng.next()) * RS; cz = (r.j + rng.next()) * RS; } continue; }
-        const genes = individualGenes(S.s, rng);
-        const a = this.spawnAgent(S, genes, hp, r, groupId, rng.range(0.6, 1.4));
-        if (rng.chance(0.18) && made > 0) { a.age = rng.range(0.25, 0.7); a.juvenile = true; }
-        made++;
-      }
-      r.agents += made;
-    }
-  }
-
-  deactivate(r) {
-    r.active = false;
-    const counts = new Float32Array(this.species.length);
+  // ------------------------------------------------------------------ queries
+  rebuildGrid() {
+    this.grid.clear();
     for (const a of this.agents) {
-      if (a.region !== r.key || a.dead) continue;
-      counts[a.sp.id] += a.juvenile ? 0.5 : 1;
-      a.dead = true;
-      a.despawned = true;
-    }
-    for (let si = 0; si < counts.length; si++) if (r.K[si] > 0 || counts[si] > 0) r.pops[si] = counts[si];
-  }
-
-  template(sp) {
-    let t = this.templates.get(sp.id);
-    if (!t) { t = buildSpeciesModel(sp); this.templates.set(sp.id, t); }
-    return t;
-  }
-
-  spawnAgent(S, genes, hp, region, groupId, ageFactor = 1) {
-    const sp = S.s;
-    const tpl = this.template(sp);
-    const obj = createCreatureObject(tpl, sp, genes);
-    const a = {
-      id: this.nextId++, sp, S, genes, obj,
-      pos: new THREE.Vector3(hp.x, hp.y, hp.z), vel: new THREE.Vector3(), heading: Math.random() * Math.PI * 2,
-      state: 'wander', target: null, timer: 0, energy: 0.6 + Math.random() * 0.3, age: ageFactor, juvenile: false,
-      sex: genes.sex, groupId, region: region.key, band: region.band, home: new THREE.Vector3(hp.x, hp.y, hp.z),
-      repro: Math.random() * 60, airborne: !!hp.air, ceil: !!hp.ceil, seed: Math.random() * 10, calling: 0,
-      animSpeed: 0, look: 0, flyAlt: hp.air ? hp.y - (hp.floor ?? hp.y - 10) : 0, lastCall: 0,
-    };
-    a.scale = sp.morph.size * genes.size;
-    obj.mesh.scale.setScalar(a.scale * (a.juvenile ? 0.5 : 1));
-    this.group.add(obj.mesh);
-    this.agents.push(a);
-    return a;
-  }
-
-  disposeAgent(a) {
-    this.group.remove(a.obj.mesh);
-    a.obj.mesh.material.dispose();
-    a.obj.mesh.skeleton.dispose();
-  }
-
-  // ------------------------------------------------------------------ AI
-  activeNow(sp) {
-    const tod = this.game.timeOfDay;
-    const deep = this.game.player.pos.y < -350;
-    const day = tod > 6.5 && tod < 18.5;
-    const twilight = (tod > 5 && tod < 8) || (tod > 17 && tod < 20);
-    switch (sp.behavior.activity) {
-      case 'nocturnal': return !day || (deep && Math.random() < 0.3);
-      case 'crepuscular': return twilight || deep;
-      case 'cathemeral': return true;
-      default: return day || deep;
+      if (a.dead) continue;
+      const k = `${Math.floor(a.pos.x / 16)}:${Math.floor(a.pos.z / 16)}`;
+      let l = this.grid.get(k); if (!l) this.grid.set(k, (l = [])); l.push(a);
     }
   }
 
-  nearest(a, filter, radius) {
-    let best = null, bd = radius * radius;
-    for (const b of this.agents) {
-      if (b === a || b.dead || !filter(b)) continue;
-      const d = (b.pos.x - a.pos.x) ** 2 + (b.pos.z - a.pos.z) ** 2 + ((b.pos.y - a.pos.y) * 0.5) ** 2;
-      if (d < bd) { bd = d; best = b; }
+  agentsNear(pos, r) {
+    const out = [];
+    const i0 = Math.floor((pos.x - r) / 16), i1 = Math.floor((pos.x + r) / 16), j0 = Math.floor((pos.z - r) / 16), j1 = Math.floor((pos.z + r) / 16);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const l = this.grid.get(`${i}:${j}`);
+      if (l) for (const a of l) if (!a.dead && a.pos.distanceToSquared(pos) < r * r) out.push(a);
     }
+    return out;
+  }
+
+  neighbours(a, r) { return this.agentsNear(a.pos, r).filter((o) => o !== a); }
+
+  carcassNear(pos, r) {
+    let best = null, bd = r * r;
+    for (const c of this.carcasses) { const d = c.pos.distanceToSquared(pos); if (d < bd && c.meat > 0) { bd = d; best = c; } }
     return best;
   }
 
-  think(a, t) {
-    if (a.dead) return;
-    const sp = a.sp, beh = sp.behavior, rel = sp.relations;
-    const dtThink = Math.min(1, t - (a.lastThink || t));
-    a.lastThink = t;
-    // metabolism & growth
-    a.energy = clamp(a.energy - dtThink * 0.004 * (a.state === 'flee' || a.state === 'hunt' ? 3 : 1), 0, 1);
-    a.repro = Math.max(0, a.repro - dtThink);
-    if (a.juvenile) {
-      a.age += dtThink / beh.reproduction.maturity;
-      a.obj.mesh.scale.setScalar(a.scale * (0.45 + 0.55 * Math.min(1, a.age)));
-      if (a.age >= 1) { a.juvenile = false; a.obj.bones.forEach((b) => b.scale.set(1, 1, 1)); a.parent = null; }
+  /** Draw curious, non-predatory creatures toward a point for a while (artifact effect). */
+  attract(pos, duration = 6) { this.attractors.push({ pos: pos.clone(), t: duration }); }
+
+  // ------------------------------------------------------------------ individuals
+  /** Genes for a new individual from a region's pool (inherited) or its subspecies. */
+  genesFor(S, r, pos, rng) {
+    const sp = S.s;
+    const info = { tier: r.band >= BAND.G0 && r.band <= BAND.G2 ? r.band - BAND.G0 : r.band === BAND.PLAIN ? 2 : 0, city: false };
+    if (sp.layer === 'surface') { const P = this.world.field.polar(pos.x, pos.z, {}); info.city = P.zone === Z_CITY; }
+    const sub = subspeciesAt(sp, pos.x, pos.y, pos.z, info);
+    const pool = r.pools[S.s.id] || (r.pools[S.s.id] = []);
+    if (pool.length >= 2 && rng.chance(0.7)) {
+      const A = rng.pick(pool), B = rng.pick(pool);
+      return inheritGenes(sp, A, B, rng);
     }
-    if (a.energy <= 0.0 && Math.random() < 0.05) { this.killAgent(a, null, 'starved'); return; }
-    a.timer -= dtThink;
-    const perc = beh.perception;
-    // the Layer 3 stalker hunts the explorer
-    if (beh.playerAware) { this.thinkStalker(a, t); return; }
-    // 1. danger
-    if (rel.predators.length) {
-      const th = this.nearest(a, (b) => rel.predators.includes(b.sp.id) && !b.juvenile, perc * (0.5 + beh.fearfulness * 0.6));
-      if (th && (th.state === 'hunt' || Math.random() < beh.fearfulness)) {
-        if (a.state !== 'flee') { this.call(a, 'alarm'); this.emit('flee', { a, from: th }); }
-        a.state = 'flee'; a.target = th; a.timer = 4;
-        // alarm spreads through the group
-        for (const g of this.agents) if (g.groupId === a.groupId && g !== a && g.state !== 'flee' && g.pos.distanceTo(a.pos) < 25) { g.state = 'flee'; g.target = th; g.timer = 4; }
-        return;
-      }
-    }
-    if (a.state === 'flee' && a.timer > 0) return;
-    // ongoing courtship displays and feeding are not interrupted by routine decisions
-    if ((a.state === 'court' || a.state === 'eat') && a.timer > 0) return;
-    // offspring follow a parent
-    if (a.juvenile && a.parent && !a.parent.dead && beh.reproduction.care !== 'none') {
-      a.state = 'follow'; a.target = a.parent;
-      return;
-    }
-    const active = this.activeNow(sp);
-    if (!active && a.state !== 'sleep' && !a.airborne) {
-      a.state = 'sleep'; a.timer = 30 + Math.random() * 40;
-      this.emit('sleep', { a });
-      return;
-    }
-    if (a.state === 'sleep' && (a.timer > 0 || !active)) return;
-    // 2. hunger
-    if (a.energy < 0.55) {
-      if (beh.diet === 'carnivore' && rel.prey.length) {
-        const prey = this.nearest(a, (b) => rel.prey.includes(b.sp.id), perc);
-        if (prey) {
-          if (a.state !== 'hunt') { this.emit('hunt', { a, prey }); this.call(a, 'hunt'); }
-          a.state = 'hunt'; a.target = prey; a.timer = 12;
-          return;
-        }
-        const car = this.carcasses.find((c) => c.pos.distanceTo(a.pos) < perc * 1.5);
-        if (car) { a.state = 'goto-carcass'; a.target = car; a.timer = 15; return; }
-      } else if (beh.diet === 'scavenger') {
-        const car = this.carcasses.find((c) => c.pos.distanceTo(a.pos) < 160);
-        if (car) { a.state = 'goto-carcass'; a.target = car; a.timer = 25; return; }
-      } else if (beh.diet === 'insectivore' || beh.diet === 'omnivore') {
-        const prey = rel.prey.length ? this.nearest(a, (b) => rel.prey.includes(b.sp.id), perc * 0.6) : null;
-        if (prey && Math.random() < 0.5) { a.state = 'hunt'; a.target = prey; a.timer = 6; this.emit('hunt', { a, prey }); return; }
-      }
-      if (a.state !== 'forage') {
-        const spot = this.findFood(a);
-        if (spot) { a.state = 'forage'; a.target = spot; a.timer = 14; return; }
-      }
-    }
-    // 3. reproduction
-    if (!a.juvenile && a.energy > 0.6 && a.repro <= 0) {
-      const reg = this.regions.get(a.region);
-      const crowd = this.agents.filter((b) => b.sp === sp && !b.dead).length;
-      const K = reg ? Math.max(2, reg.K[sp.id] * 2.5) : 4;
-      if (crowd < K + 2) {
-        const mate = this.nearest(a, (b) => b.sp === sp && b.sex !== a.sex && !b.juvenile && b.repro <= 0 && b.energy > 0.5, perc * 1.5);
-        if (mate) {
-          a.state = 'court'; a.target = mate; a.timer = 10;
-          mate.state = 'court'; mate.target = a; mate.timer = 10;
-          this.emit('court', { a, b: mate });
-          this.call(a, 'mate');
-          return;
-        }
-      }
-    }
-    // 4. territory
-    if (beh.territoriality > 0.5 && !a.juvenile && t - (a.lastTerritory || -99) > 20) {
-      const rival = this.nearest(a, (b) => (b.sp === sp && b.groupId !== a.groupId && !b.juvenile) || rel.competitors.includes(b.sp.id), 14 + beh.territoriality * 16);
-      if (rival && a.state !== 'chase') {
-        a.state = 'chase'; a.target = rival; a.timer = 5; a.lastTerritory = t;
-        if (rival.state !== 'flee') { rival.state = 'flee'; rival.target = a; rival.timer = 4; }
-        this.emit('territorial', { a, b: rival });
-        this.call(a, 'threat');
-        return;
-      }
-    }
-    if (a.state === 'chase' && a.timer > 0) return;
-    // 5. symbiosis: stay near a host
-    if (rel.symbiontOf !== null && rel.symbiontOf !== undefined) {
-      const host = this.nearest(a, (b) => b.sp.id === rel.symbiontOf, 60);
-      if (host) {
-        if (a.state !== 'symbiosis' && t - (a.lastSym || -99) > 60) { a.lastSym = t; this.emit('symbiosis', { a, host }); }
-        a.state = 'symbiosis'; a.target = host; a.timer = 8;
-        a.energy = Math.min(1, a.energy + 0.02);
-        return;
-      }
-    }
-    // 6. drink now and then
-    if (a.timer <= 0 && Math.random() < 0.08 && !a.airborne && !a.ceil) {
-      const w = this.findWater(a);
-      if (w) { a.state = 'drink'; a.target = w; a.timer = 10; return; }
-    }
-    // 7. social cohesion / wandering / migration
-    if (a.timer <= 0) {
-      const r = Math.random();
-      if (beh.social !== 'solitary' && r < 0.5) {
-        const mate = this.nearest(a, (b) => b.groupId === a.groupId, 60);
-        if (mate) { a.state = 'flock'; a.target = mate; a.timer = 5 + Math.random() * 5; return; }
-      }
-      if (r < 0.12 && (a.airborne || beh.social === 'herd')) {
-        // migration: shift the home range across the region grid
-        const ang = Math.random() * Math.PI * 2;
-        const dist = 60 + Math.random() * 80;
-        const hp = this.habitatPoint(a.S, a.home.x + Math.cos(ang) * dist, a.home.z + Math.sin(ang) * dist, a.band);
-        if (hp) {
-          a.home.set(hp.x, hp.y, hp.z);
-          for (const g of this.agents) if (g.groupId === a.groupId) g.home.copy(a.home);
-          this.emit('migrate', { a });
-        }
-      }
-      a.state = Math.random() < 0.25 ? 'idle' : 'wander';
-      a.timer = 3 + Math.random() * 6;
-      if (a.state === 'wander') {
-        const ang = Math.random() * Math.PI * 2, d = 6 + Math.random() * 22;
-        a.target = { pos: new THREE.Vector3(a.home.x + Math.cos(ang) * d, a.home.y, a.home.z + Math.sin(ang) * d) };
-      }
-      if (Math.random() < 0.15 && t - a.lastCall > sp.call.interval) this.call(a, 'idle');
-    }
+    // hybrids where two forms meet: occasionally blend with a neighbouring subspecies
+    const n = sp.subspecies.length;
+    const g = rng.chance(0.12) && n > 1 ? individualGenes(sp, rng, sub, (sub + 1) % n, rng.range(0.2, 0.6)) : individualGenes(sp, rng, sub);
+    pool.push(g);
+    if (pool.length > POOL) pool.splice(rng.int(0, pool.length - 1), 1);
+    return g;
   }
 
-  thinkStalker(a, t) {
-    const p = this.game.player;
-    const d = a.pos.distanceTo(p.pos);
-    const inFault = p.pos.y < -880;
-    const lamp = this.game.lamp && this.game.lamp.on && this.game.lamp.power > 0.6;
-    if (a.state === 'retreat' && a.timer > 0) return;
-    if (!inFault || d > 160 || p.mode === 'dead') { if (a.state !== 'wander') { a.state = 'wander'; a.timer = 4; } return; }
-    if (lamp && d < 14 && a.state !== 'retreat') {
-      a.state = 'retreat'; a.timer = 12; a.target = null; this.emit('flee', { a, from: { sp: { id: -1 }, pos: p.pos } }); this.call(a, 'alarm');
-      return;
-    }
-    if (a.state !== 'stalk' && a.state !== 'charge') { a.state = 'stalk'; a.stalkTime = 0; this.emit('stalk-player', { a }); this.call(a, 'threat'); }
-    if (a.state === 'stalk') {
-      a.stalkTime += 0.1;
-      if (d < 7 || a.stalkTime > 25 + (a.seed % 10)) { a.state = 'charge'; a.timer = 6; this.call(a, 'hunt'); this.emit('charge-player', { a }); }
-    }
+  spawn(S, pos, genes, opts = {}) {
+    const sp = S.s;
+    const rng = S.rng;
+    let ph = phenotype(sp, genes);
+    const maturity = sp.behavior.reproduction.maturity;
+    const age = opts.age ?? (rng.chance(0.15) ? rng.range(0, maturity * 0.8) : rng.range(maturity, maturity * 4));
+    if (age < maturity) ph = juvenilize(ph, Math.max(0.35, age / maturity));
+    const ageScale = age < maturity ? 0.45 + 0.55 * (age / maturity) : 1;
+    const a = {
+      id: this.nextId++, sp, S, genes, ph, sex: genes.sex, sub: genes.sub,
+      age, maturity, scale: ph.scale * ageScale, ageScale,
+      pos: new THREE.Vector3(pos.x, pos.y, pos.z), vel: new THREE.Vector3(), yaw: rng.range(-Math.PI, Math.PI), pitch: 0, roll: 0,
+      up: new THREE.Vector3(0, 1, 0), mode: pos.mode || 'ground', node: pos.node ?? -1, next: -1, lane: rng.range(-0.35, 0.35), phi: pos.phi ?? 0,
+      state: 'idle', target: null, timer: rng.range(0, 1.5), thinkT: rng.range(0, 0.8),
+      needs: { hunger: rng.range(0.1, 0.6), energy: rng.range(0.5, 1), fear: 0, mate: rng.range(0, 0.5) },
+      home: null, group: null, leader: null, parent: opts.parent || null, mate: null, nestEggs: 0, eggT: 0,
+      calling: 0, callT: rng.range(2, 15), strike: 0, region: opts.region || null, speed: 0, turn: 0, bank: 0,
+      wanderDir: new THREE.Vector3(Math.cos(rng.range(0, 6.28)), 0, Math.sin(rng.range(0, 6.28))),
+      obj: null, dead: false, visible: false, anim: null, built: false, flapping: true, lastFloorY: pos.y,
+    };
+    Object.defineProperty(a, 'juvenile', { get() { return this.age < this.maturity; } });
+    Object.defineProperty(a, 'airborne', { get() { return this.mode === 'air'; } });
+    Object.defineProperty(a, 'ceil', { get() { return this.mode === 'ceiling' || this.mode === 'hang'; } });
+    a.band = this.hab.bandAt(a.pos.x, a.pos.y + 0.5, a.pos.z);
+    // home site: nests, roosts and dens for Layer 3 fauna
+    const sites = this.hab.homeSites(sp);
+    if (sites && sites.length) {
+      let best = null, bd = Infinity;
+      for (const s of sites) { const d = (s.x - a.pos.x) ** 2 + ((s.y - a.pos.y) * 1.5) ** 2 + (s.z - a.pos.z) ** 2; if (d < bd) { bd = d; best = s; } }
+      if (best && bd < 160 * 160) a.home = { pos: new THREE.Vector3(best.x, best.y, best.z), kind: best.kind, nx: best.nx || 0, nz: best.nz || 0 };
+    } else if (a.mode === 'air') {
+      // fliers outside the fault come down to the ground to rest
+      const f = this.hab.floorNear(a.pos.x, a.pos.y, a.pos.z, 200, 1.5);
+      a.home = f ? { pos: new THREE.Vector3(a.pos.x, f.y, a.pos.z), kind: 'ground' } : { pos: a.pos.clone(), kind: 'range' };
+    } else a.home = { pos: a.pos.clone(), kind: 'range' };
+    this.agents.push(a);
+    this.buildQueue.push(a);
+    this.stats.spawned++;
+    return a;
   }
 
-  findFood(a) {
-    const beh = a.sp.behavior;
-    const W = this.world;
-    for (let k = 0; k < 6; k++) {
-      const ang = Math.random() * Math.PI * 2, d = 4 + Math.random() * 20;
-      const x = a.pos.x + Math.cos(ang) * d, z = a.pos.z + Math.sin(ang) * d;
-      if (a.airborne) {
-        const fy = W.floorBelow(x, a.pos.y, z);
-        if (fy === -Infinity) continue;
-        const mat = W.floorMaterial(x, fy, z);
-        if (beh.diet === 'piscivore') { const c = W.columnAt(x, z); if (!Number.isNaN(c.water)) return { pos: new THREE.Vector3(x, c.water, z), kind: 'fish' }; continue; }
-        if (beh.diet === 'nectar' && !isGrassy(mat)) continue;
-        return { pos: new THREE.Vector3(x, fy + 0.6, z), kind: beh.diet === 'nectar' ? 'flowers' : 'insects' };
-      }
-      if (a.ceil) return { pos: new THREE.Vector3(x, a.pos.y, z), kind: 'insects' };
-      const fy = W.floorBelow(x, a.pos.y + 2, z);
-      if (Math.abs(fy - a.pos.y) > 3) continue;
-      const mat = W.floorMaterial(x, fy, z);
-      if ((beh.diet === 'grazer' || beh.diet === 'browser' || beh.diet === 'omnivore' || beh.diet === 'detritivore') && FOOD_MATS.graze.has(mat)) return { pos: new THREE.Vector3(x, fy, z), kind: mat === M.LITTER || mat === M.MOSS ? 'moss' : 'grass' };
-      if (beh.diet === 'lithophage' && FOOD_MATS.mineral.has(mat)) return { pos: new THREE.Vector3(x, fy, z), kind: mat === M.CRYSTAL ? 'crystal' : 'minerals' };
-      if (beh.diet === 'piscivore') { const c = W.columnAt(x, z); if (!Number.isNaN(c.water)) return { pos: new THREE.Vector3(x, fy, z), kind: 'fish' }; }
+  build(a) {
+    if (a.built || a.dead) return;
+    const cr = buildCreature(a.ph, a.id);
+    const root = new THREE.Group();
+    root.add(cr.mesh);
+    root.scale.setScalar(a.ageScale);
+    root.matrixAutoUpdate = true;
+    a.obj = { root, mesh: cr.mesh, creature: cr };
+    a.anim = new Animator(cr, a.ph, a.sp, a.id);
+    a.built = true;
+    this.group.add(root);
+  }
+
+  dispose(a) {
+    if (a.obj) {
+      this.group.remove(a.obj.root);
+      a.obj.mesh.geometry.dispose();
+      a.obj.mesh.skeleton.dispose();
     }
-    return null;
+    a.obj = null; a.anim = null;
   }
 
-  findWater(a) {
-    for (let k = 0; k < 8; k++) {
-      const ang = (k / 8) * Math.PI * 2, d = 10 + Math.random() * 25;
-      const x = a.pos.x + Math.cos(ang) * d, z = a.pos.z + Math.sin(ang) * d;
-      const c = this.world.columnAt(x, z);
-      if (!Number.isNaN(c.water) && Math.abs(c.water - a.pos.y) < 4) return { pos: new THREE.Vector3(x, c.water, z), kind: 'water' };
+  /** Fold an individual back into its region's population (and its genes into the pool). */
+  despawn(a) {
+    const r = a.region;
+    if (r && !a.dead) {
+      r.pops[a.sp.id] = Math.min(r.K[a.sp.id] * 1.5 + 1, r.pops[a.sp.id] + 1);
+      const pool = r.pools[a.sp.id] || (r.pools[a.sp.id] = []);
+      pool.push(a.genes);
+      if (pool.length > POOL) pool.shift();
     }
-    return null;
+    a.dead = true;
+    a.gone = true;
+    this.stats.despawned++;
   }
 
-  call(a, kind) {
-    a.calling = 0.6;
-    a.lastCall = this.game.gameTime;
-    this.emit('call', { a, kind });
-  }
-
-  killAgent(a, by, cause) {
+  kill(a, killer) {
     if (a.dead) return;
     a.dead = true;
     this.stats.deaths++;
-    if (cause !== 'starved' || Math.random() < 0.5) this.carcasses.push({ pos: a.pos.clone(), sp: a.sp, meat: a.scale * 2, time: 240 });
-    if (by) { this.stats.kills++; this.emit('kill', { a: by, prey: a }); }
-    else this.emit('death', { a, cause });
+    if (killer) this.stats.kills++;
+    this.carcasses.push({ pos: a.pos.clone(), meat: a.ph.scale * 2, time: 240, sp: a.sp });
   }
 
-  birth(mother, father) {
-    const sp = mother.sp;
-    const n = sp.behavior.reproduction.litter;
-    const rng = new RNG((Math.random() * 4294967296) >>> 0);
-    for (let i = 0; i < n; i++) {
-      if (this.agents.length >= MAX_AGENTS + 10) break;
-      const genes = inheritGenes(sp, mother.genes, father.genes, rng);
-      const hp = { x: mother.pos.x + rng.range(-1, 1), y: mother.pos.y, z: mother.pos.z + rng.range(-1, 1), air: mother.airborne, ceil: mother.ceil };
-      const region = this.regions.get(mother.region) || { key: mother.region, band: mother.band };
-      const baby = this.spawnAgent(mother.S, genes, hp, region, mother.groupId, 0.05);
-      baby.juvenile = true;
-      baby.age = 0.05;
-      baby.parent = mother;
-      baby.home.copy(mother.home);
-      baby.obj.mesh.scale.setScalar(baby.scale * 0.45);
-      this.stats.births++;
-      this.emit('birth', { a: mother, baby, father });
+  // ------------------------------------------------------------------ activation
+  updateActivation(ppos) {
+    // regions around the explorer in the bands near its depth
+    const bands = new Set();
+    for (const dy of [0, -45, 45, -110, 110]) bands.add(this.hab.bandAt(ppos.x, ppos.y + dy, ppos.z));
+    if (this.hab.bandAt(ppos.x, ppos.y, ppos.z) === BAND.CAVE3 || this.hab.bandAt(ppos.x, ppos.y, ppos.z) === BAND.CHASM) { bands.add(BAND.CAVE3); bands.add(BAND.CHASM); }
+    const want = new Set();
+    for (const r of this.regions.values()) r.active = false;
+    const rr = Math.ceil(ACTIVE_R / RS);
+    const ci = Math.floor(ppos.x / RS), cj = Math.floor(ppos.z / RS);
+    // nearest regions first; surveying new ground is spread over several passes
+    const cells = [];
+    for (let dj = -rr; dj <= rr; dj++) for (let di = -rr; di <= rr; di++) {
+      const x = (ci + di + 0.5) * RS, z = (cj + dj + 0.5) * RS;
+      const d = Math.hypot(x - ppos.x, z - ppos.z);
+      if (d <= ACTIVE_R + RS * 0.5) cells.push([d, x, z]);
     }
-    mother.repro = sp.behavior.reproduction.cooldown;
-    father.repro = sp.behavior.reproduction.cooldown * 0.5;
-    mother.energy -= 0.25;
+    cells.sort((A, B) => A[0] - B[0]);
+    const deadline = performance.now() + 4;
+    for (const [, x, z] of cells) {
+      for (const b of bands) {
+        for (const dy of b === BAND.CAVE3 || b === BAND.CHASM ? [0, -160, 160] : [0]) {
+          const y = ppos.y + dy;
+          const key = this.regionKey(b, x, y, z);
+          if (want.has(key)) continue;
+          want.add(key);
+          const r = this.region(key, x, y, z, b, deadline);
+          if (r) r.active = true;
+        }
+      }
+    }
+    // despawn far individuals
+    const live = this.agents.filter((a) => !a.dead);
+    for (const a of live) {
+      const d = a.pos.distanceTo(ppos);
+      if (d > (a.mode === 'air' ? DROP_R + 60 : DROP_R) || (Math.abs(a.pos.y - ppos.y) > 220)) this.despawn(a);
+    }
+    // spawn: per active region, materialise its population (within the global budget)
+    let count = this.agents.filter((a) => !a.dead).length;
+    const active = [...this.regions.values()].filter((r) => r.active);
+    active.sort((A, B) => Math.hypot(A.x - ppos.x, A.z - ppos.z) - Math.hypot(B.x - ppos.x, B.z - ppos.z));
+    const camFwd = _v3.set(0, 0, -1);
+    if (this.game.camera) camFwd.applyQuaternion(this.game.camera.quaternion);
+    for (const r of active) {
+      if (count >= this.maxAgents) break;
+      for (let si = 0; si < this.sp.length && count < this.maxAgents; si++) {
+        const S = this.sp[si];
+        const pop = r.pops[si];
+        if (pop < 0.5) continue;
+        const have = live.filter((a) => a.region === r && a.S === S && !a.dead).length;
+        const want = Math.min(Math.round(pop), S.s.behavior.groupSize[1] + 2);
+        if (have >= want) continue;
+        // spawn a group together
+        const rng = S.rng;
+        const center = this.hab.sample(S.s, rng, r.x, ppos.y, r.z, RS * 0.75);
+        if (!center) continue;
+        // keep spawns out of the explorer's immediate view
+        const dx = center.x - ppos.x, dz = center.z - ppos.z, d = Math.hypot(dx, dz);
+        if (d < 22 || (d < 55 && (dx * camFwd.x + dz * camFwd.z) / d > 0.55)) continue;
+        const n = Math.min(want - have, this.maxAgents - count);
+        const groupId = n > 1 ? this.nextId * 31 : null;
+        let leader = null;
+        for (let k = 0; k < n; k++) {
+          const p = k === 0 ? center : this.hab.sample(S.s, rng, center.x, center.y, center.z, 6 + S.s.size * 4) || center;
+          const g = this.genesFor(S, r, p, rng);
+          const a = this.spawn(S, p, g, { region: r });
+          r.pops[si] = Math.max(0, r.pops[si] - 1);
+          a.group = groupId;
+          if (!leader) leader = a;
+          a.leader = leader;
+          // young of the group follow an adult
+          if (a.juvenile && leader !== a) a.parent = leader;
+          count++;
+        }
+      }
+    }
+    this.agents = this.agents.filter((a) => {
+      if (a.dead && (a.gone || a.deadT > 3)) { this.dispose(a); return false; }
+      return true;
+    });
   }
 
-  // ------------------------------------------------------------------ movement
-  move(a, dt, t) {
-    if (a.dead) return;
-    const sp = a.sp, beh = sp.behavior;
-    const W = this.world;
-    let tx = null, tz = null, ty = null;
-    let speed = 0;
-    const tgt = a.target;
-    const tpos = tgt ? (tgt.pos || tgt) : null;
+  // ------------------------------------------------------------------ main update
+  update(dt) {
+    dt = Math.min(dt, 0.1);
+    const g = this.game;
+    const player = g.player;
+    if (!player) return;
+    this.player = player;
+    this.playerAgent.pos.copy(player.pos);
+    this.hour = g.timeOfDay ?? 12;
+    this.dark = player.pos.y < -880 || (this.hour < 5.5 || this.hour > 20.5);
+    this.lampOn = !!(g.lampOn ?? (player.pos.y < -880));
+    this.playerSafe = player.mode === 'dead';
+    this.playerCalm = !player.vel || player.vel.length() < 1.8;
+    this.tickTimer -= dt;
+    if (this.tickTimer <= 0) { this.tickTimer = 5; this.abstractTick(5); }
+    this.activationTimer -= dt;
+    if (this.activationTimer <= 0) { this.activationTimer = 1.0; this.updateActivation(player.pos); }
+    // build bodies within a small time budget per frame (at least one)
+    const bt = performance.now();
+    while (this.buildQueue.length) {
+      this.build(this.buildQueue.shift());
+      if (performance.now() - bt > 2.5) break;
+    }
+    this.rebuildGrid();
+    for (const at of this.attractors) at.t -= dt;
+    this.attractors = this.attractors.filter((at) => at.t > 0);
+    const cam = g.camera ? g.camera.position : player.pos;
+    this.frame = (this.frame || 0) + 1;
+    for (const a of this.agents) {
+      if (a.dead) { a.deadT = (a.deadT || 0) + dt; if (a.obj) a.obj.root.visible = false; continue; }
+      // distant individuals think and move at a lower rate (simulation level of detail)
+      let d2 = a.pos.distanceToSquared(cam);
+      const every = d2 < 70 * 70 ? 1 : d2 < 130 * 130 ? 2 : 3;
+      a.liveDt = (a.liveDt || 0) + dt;
+      if (every === 1 || (this.frame + a.id) % every === 0) {
+        this.live(a, Math.min(0.25, a.liveDt));
+        a.liveDt = 0;
+        d2 = a.pos.distanceToSquared(cam);
+      }
+      if (!a.obj) continue;
+      a.visible = d2 < VIS_R * VIS_R;
+      a.obj.root.visible = a.visible;
+      if (!a.visible) continue;
+      this.place(a);
+      // animate near creatures every frame, far ones less often
+      const anim = d2 < 40 * 40 ? 1 : d2 < 90 * 90 ? 2 : 4;
+      a.animDt = (a.animDt || 0) + dt;
+      if ((this.frame + a.id) % anim === 0) { this.animate(a, a.animDt); a.animDt = 0; }
+    }
+    for (const c of this.carcasses) c.time -= dt;
+    this.carcasses = this.carcasses.filter((c) => c.time > 0 && c.meat > 0);
+  }
+
+  /** Needs, decisions, action, movement and life events of one individual. */
+  live(a, dt) {
+    const N = a.needs, sp = a.sp;
+    a.age += dt;
+    const sleeping = a.state === 'sleep';
+    N.hunger = Math.min(1, N.hunger + dt / (220 + a.ph.scale * 120));
+    N.energy = clamp(N.energy + (sleeping ? dt / 90 : -dt / (500 + a.ph.scale * 100)), 0, 1);
+    if (!a.juvenile) N.mate = Math.min(1, N.mate + dt / (260 + sp.behavior.reproduction.cooldown));
+    N.fear = Math.max(0, N.fear - dt * 0.1);
+    // habituation to the explorer: grows while it stays near and calm, fades when it rushes about
+    const pd = a.pos.distanceTo(this.playerAgent.pos);
+    if (pd < 40) a.habit = clamp((a.habit || 0) + dt * (this.playerCalm ? 1 / 25 : -1 / 6), 0, 1);
+    else a.habit = Math.max(0, (a.habit || 0) - dt / 60);
+    // grow up
+    if (a.juvenile && a.built && Math.random() < dt * 0.02) {
+      const s = 0.45 + 0.55 * Math.min(1, a.age / a.maturity);
+      a.ageScale = s; a.scale = a.ph.scale * s;
+      if (a.obj) a.obj.root.scale.setScalar(s);
+    }
+    a.timer -= dt;
+    a.thinkT -= dt;
+    if (a.avoidT > 0) a.avoidT -= dt;
+    if (a.fleeEvT > 0) a.fleeEvT -= dt;
+    if (a.broodT > 0) a.broodT -= dt;
+    if (a.thinkT <= 0) {
+      a.thinkT = 0.45 + Math.random() * 0.5;
+      const prev = a.state;
+      decide(a, this);
+      this.onActionStart(a, prev);
+    }
+    this.act(a, dt);
+    this.move(a, dt);
+    // calls: idle chatter, alarms and threats
+    a.calling = Math.max(0, a.calling - dt);
+    a.callT -= dt;
+    if (a.callT <= 0) {
+      a.callT = sp.call.interval * (0.6 + Math.random() * 0.8) * (a.state === 'sleep' ? 4 : 1);
+      if (a.state !== 'sleep') this.call(a, a.state === 'court' ? 'court' : 'idle');
+    }
+    a.band = this.hab.bandAt(a.pos.x, a.pos.y + 0.5, a.pos.z);
+  }
+
+  call(a, kind) {
+    a.calling = Math.max(a.calling, a.sp.call.length + 0.2);
+    this.emit('call', { a, kind });
+  }
+
+  /** First frame of a new action: events and calls. */
+  onActionStart(a, prev) {
+    if (a.state === prev) return;
+    const t = a.target;
     switch (a.state) {
       case 'flee': {
-        if (tpos) { const dx = a.pos.x - tpos.x, dz = a.pos.z - tpos.z; const l = Math.hypot(dx, dz) || 1; tx = a.pos.x + dx / l * 10; tz = a.pos.z + dz / l * 10; }
-        speed = beh.speed.run;
-        a.timer -= dt;
+        if (!(a.fleeEvT > 0)) { this.emit('flee', { a, from: t && t.agent }); a.fleeEvT = 8; }
+        if (Math.random() < 0.6) this.call(a, 'alarm');
+        // alarm spreads through the group
+        for (const o of this.neighbours(a, 25)) if (o.sp === a.sp && o.state !== 'flee') { o.needs.fear = Math.max(o.needs.fear, 0.7); o.thinkT = Math.random() * 0.3; }
+        break;
+      }
+      case 'hunt': this.emit('hunt', { a, prey: t.agent }); this.call(a, 'hunt'); break;
+      case 'stalk': this.emit('stalk-player', { a }); this.call(a, 'threat'); break;
+      case 'court': this.emit('court', { a, b: t.agent }); this.call(a, 'court'); break;
+      case 'defend': this.emit('territorial', { a, b: t.agent }); this.call(a, 'threat'); break;
+      case 'mob': this.emit('mob', { a, b: t.agent }); this.call(a, 'alarm'); break;
+      case 'guard': this.emit('guard', { a }); this.call(a, 'threat'); break;
+      case 'symbiosis': this.emit('symbiosis', { a, host: t.agent }); break;
+      case 'investigate': this.emit('investigate', { a }); break;
+      case 'sleep': case 'roost': if (a.home && a.home.kind !== 'range' && !a.roostSeen && a.pos.distanceTo(a.home.pos) < 3) { a.roostSeen = true; this.emit('roost', { a, kind: a.home.kind }); } break;
+      case 'scavenge': this.emit('scavenge', { a }); break;
+      default: break;
+    }
+  }
+
+  /** Carry out the current action: desired speed, target point and interactions. */
+  act(a, dt) {
+    const t = a.target, st = a.ph.stats;
+    const run = st.run, walk = st.walk, fly = st.fly || walk * 3;
+    const air = a.mode === 'air';
+    a.goal = a.goal || new THREE.Vector3();
+    a.action = 'idle';
+    let speed = 0, hasGoal = false;
+    const tgtPos = t && t.agent ? t.agent.pos : t && t.pos ? t.pos : null;
+    switch (a.state) {
+      case 'flee': {
+        if (!tgtPos) break;
+        // away from the threat (and toward home if there is one close by)
+        _v.subVectors(a.pos, tgtPos); _v.y = air ? 0.3 * _v.length() : 0;
+        if (_v.lengthSq() < 1e-4) _v.set(1, 0, 0);
+        _v.normalize();
+        a.goal.copy(a.pos).addScaledVector(_v, 20);
+        if (a.home && a.home.kind !== 'range' && a.pos.distanceTo(a.home.pos) < 60) a.goal.lerp(a.home.pos, 0.6);
+        speed = air ? fly * 1.3 : run; hasGoal = true; a.action = 'alert';
+        a.avoid = a.avoid || new THREE.Vector3();
+        a.avoid.copy(tgtPos); a.avoidT = 20;
         break;
       }
       case 'hunt': {
-        if (!tgt || tgt.dead) { a.state = 'idle'; a.timer = 2; break; }
-        tx = tpos.x; tz = tpos.z; ty = tpos.y;
-        speed = beh.speed.run * 1.05;
-        const d = a.pos.distanceTo(tpos);
-        if (d < 0.6 + a.scale * 0.6) {
-          a.strike = 0.4;
-          const strength = a.scale * (1 + beh.aggression);
-          if (Math.random() < 0.55 * strength / (strength + tgt.scale)) {
-            this.killAgent(tgt, a, 'predation');
-            a.state = 'eat'; a.timer = 8; a.energy = Math.min(1, a.energy + 0.5);
-            a.target = this.carcasses[this.carcasses.length - 1];
-          } else if (tgt.state !== 'flee') { tgt.state = 'flee'; tgt.target = a; tgt.timer = 4; }
+        const prey = t.agent;
+        if (!prey || prey.dead) { a.timer = 0; break; }
+        const d = prey.pos.distanceTo(a.pos);
+        a.goal.copy(prey.pos); hasGoal = true;
+        speed = d > 12 ? (air ? fly * 1.4 : run * 0.9) : (air ? fly * 1.6 : run);
+        if (d < Math.max(0.8, a.scale * 0.6 + prey.scale * 0.3)) {
+          a.action = 'attack';
+          a.strike += dt;
+          if (a.strike > 0.4) {
+            a.strike = 0;
+            // the strike lands more often against slow, small or young prey
+            const p = clamp(0.45 + (a.genes.c[G.agility] - prey.genes.c[G.agility]) * 0.4 + (prey.juvenile ? 0.2 : 0) - prey.needs.fear * 0.15, 0.1, 0.9);
+            if (Math.random() < p) {
+              this.kill(prey, a);
+              this.emit('kill', { a, prey });
+              this.call(a, 'hunt');
+              a.state = 'eat'; a.target = { pos: prey.pos.clone(), kind: 'kill' }; a.timer = 10;
+              a.needs.hunger = Math.max(0, a.needs.hunger - 0.7);
+            } else prey.needs.fear = 1;
+          }
         }
-        a.timer -= dt;
-        if (a.timer <= 0) { a.state = 'idle'; a.timer = 3; }
         break;
       }
-      case 'goto-carcass': {
-        if (!tgt || tgt.meat <= 0) { a.state = 'idle'; a.timer = 2; break; }
-        tx = tpos.x; tz = tpos.z; ty = tpos.y;
-        speed = a.airborne ? beh.speed.walk : beh.speed.walk * 1.3;
-        if (Math.hypot(a.pos.x - tpos.x, a.pos.z - tpos.z) < 1.2 + a.scale * 0.5) { a.state = 'eat'; a.timer = 8; this.emit('scavenge', { a, carcass: tgt }); }
-        break;
-      }
-      case 'eat': {
-        if (tgt && tgt.meat !== undefined) { tgt.meat -= dt * 0.1 * a.scale; }
-        a.energy = Math.min(1, a.energy + dt * 0.05);
-        a.timer -= dt;
-        if (a.timer <= 0) { a.state = 'idle'; a.timer = 2; }
+      case 'eat': a.action = 'eat'; break;
+      case 'scavenge': {
+        if (!t || !t.carcass || t.carcass.meat <= 0) { a.timer = 0; break; }
+        const d = t.carcass.pos.distanceTo(a.pos);
+        if (d > 1.5) { a.goal.copy(t.carcass.pos); hasGoal = true; speed = air ? fly : walk * 1.4; } else {
+          a.action = 'eat';
+          t.carcass.meat -= dt * 0.05 * a.ph.scale;
+          a.needs.hunger = Math.max(0, a.needs.hunger - dt * 0.05);
+        }
         break;
       }
       case 'forage': {
-        if (!tpos) { a.state = 'idle'; break; }
-        tx = tpos.x; tz = tpos.z; ty = tpos.y;
-        speed = beh.speed.walk * 0.7;
-        const d = Math.hypot(a.pos.x - tpos.x, a.pos.z - tpos.z);
-        if (d < 1.2 + a.scale * 0.3) {
-          speed = 0;
-          a.grazing = true;
-          a.energy = Math.min(1, a.energy + dt * 0.04);
-          if (!a.forageEmitted) { a.forageEmitted = true; this.emit('forage', { a, kind: tgt.kind }); }
-          a.timer -= dt;
-          if (a.timer <= 0 || a.energy > 0.95) { a.state = 'idle'; a.timer = 2; a.grazing = false; a.forageEmitted = false; }
-        } else a.grazing = false;
+        // graze, peck, browse lichen or hawk for insects in the air
+        if (!a.foragePt || a.timer < 0.5 || a.foragePt.distanceTo(a.pos) > 30) {
+          a.foragePt = a.foragePt || new THREE.Vector3();
+          const r = air ? 18 : 6 + a.scale * 3;
+          a.foragePt.set(a.pos.x + (Math.random() - 0.5) * 2 * r, a.pos.y + (air ? (Math.random() - 0.5) * 8 : 0), a.pos.z + (Math.random() - 0.5) * 2 * r);
+        }
+        const d = a.foragePt.distanceTo(a.pos);
+        if (air) { a.goal.copy(a.foragePt); hasGoal = true; speed = fly * 0.9; a.flapping = true; }
+        else if (d > 1.2) { a.goal.copy(a.foragePt); hasGoal = true; speed = walk * 0.6; } else {
+          a.action = 'eat';
+          a.needs.hunger = Math.max(0, a.needs.hunger - dt * 0.03);
+          if (Math.random() < dt * 0.05) this.emit('forage', { a, kind: this.forageKind(a) });
+        }
         break;
       }
-      case 'drink': {
-        if (!tpos) { a.state = 'idle'; break; }
-        tx = tpos.x; tz = tpos.z;
-        speed = beh.speed.walk * 0.8;
-        if (Math.hypot(a.pos.x - tpos.x, a.pos.z - tpos.z) < 3) {
-          speed = 0; a.grazing = true;
-          if (!a.drinkEmitted) { a.drinkEmitted = true; this.emit('drink', { a }); }
-          a.timer -= dt;
-          if (a.timer <= 0) { a.state = 'idle'; a.timer = 2; a.grazing = false; a.drinkEmitted = false; }
+      case 'sleep': case 'rest': case 'idle': {
+        a.action = a.state === 'idle' && Math.random() < 0.003 ? 'groom' : 'idle';
+        if (a.state === 'idle' && Math.random() < dt * 0.15) a.lookAround = (Math.random() - 0.5) * 2;
+        break;
+      }
+      case 'roost': case 'nest': {
+        if (!a.home) { a.timer = 0; break; }
+        const d = a.home.pos.distanceTo(a.pos);
+        if (d > 1.2) { a.goal.copy(a.home.pos); hasGoal = true; speed = air ? fly : walk * 1.1; }
+        else {
+          this.settle(a);
+          if (a.state === 'nest') this.tendNest(a, dt);
+          if (a.state === 'roost') { a.state = 'sleep'; a.timer = 30; }
         }
         break;
       }
       case 'court': {
-        if (!tgt || tgt.dead) { a.state = 'idle'; break; }
-        // circling display
-        const ang = t * 1.2 + a.seed;
-        tx = tpos.x + Math.cos(ang) * (1.5 + a.scale); tz = tpos.z + Math.sin(ang) * (1.5 + a.scale);
-        speed = beh.speed.walk;
-        a.timer -= dt;
-        if (a.timer <= 0) {
-          const female = a.sex === 'f' ? a : tgt.sex === 'f' ? tgt : null;
-          const male = female === a ? tgt : a;
-          if (female && !female.dead && female.repro <= 0 && female.pos.distanceTo(male.pos) < 8 + a.scale * 2) this.birth(female, male);
-          // a failed or finished courtship is not repeated straight away
-          for (const x of [a, tgt]) if (x.repro <= 0) x.repro = 30 + Math.random() * 40;
-          a.state = 'idle'; a.timer = 4;
-          if (tgt.state === 'court') { tgt.state = 'idle'; tgt.timer = 4; }
-        }
-        break;
-      }
-      case 'chase': {
-        if (!tgt || tgt.dead) { a.state = 'idle'; break; }
-        tx = tpos.x; tz = tpos.z; speed = beh.speed.run * 0.8;
-        a.timer -= dt;
-        if (a.timer <= 0) { a.state = 'idle'; a.timer = 3; }
+        const m = t.agent;
+        if (!m || m.dead) { a.timer = 0; break; }
+        const d = m.pos.distanceTo(a.pos);
+        a.action = 'display';
+        if (d > 2 + a.scale) { a.goal.copy(m.pos); hasGoal = true; speed = air ? fly * 0.8 : walk * 0.8; }
+        else if (m.state === 'court' && m.target && m.target.agent === a && a.sex === 'f') this.mate(a, m);
         break;
       }
       case 'follow': case 'flock': case 'symbiosis': {
-        if (!tgt || tgt.dead) { a.state = 'idle'; a.timer = 1; break; }
-        const d = a.pos.distanceTo(tpos);
-        const keep = a.state === 'symbiosis' ? 1.5 + tgt.scale * 0.7 : a.state === 'follow' ? 1.5 + tgt.scale : 3 + a.scale * 2;
-        if (d > keep) { tx = tpos.x; tz = tpos.z; ty = tpos.y + (a.state === 'symbiosis' && a.airborne ? tgt.scale * 1.2 : 0); speed = Math.min(beh.speed.run, (tgt.animSpeed || beh.speed.walk) * 1.15 + d * 0.15); }
-        if (a.state !== 'follow') { a.timer -= dt; if (a.timer <= 0) { a.state = 'idle'; a.timer = 2; } }
+        const o = t && t.agent;
+        if (!o || o.dead) { a.timer = 0; break; }
+        const d = o.pos.distanceTo(a.pos);
+        const keep = a.state === 'follow' ? 1.5 + a.scale : a.state === 'symbiosis' ? 1 + o.scale * 0.6 : 3 + a.scale * 2;
+        if (d > keep) { a.goal.copy(o.pos); hasGoal = true; speed = Math.min(o.speed > 0.2 ? o.speed * 1.15 : walk, air ? fly : run); if (d > keep * 3) speed = air ? fly : run * 0.8; }
+        if (a.state === 'symbiosis' && d < keep * 1.5) a.action = 'eat';
         break;
       }
-      case 'wander': {
-        if (tpos) { tx = tpos.x; tz = tpos.z; speed = beh.speed.walk * 0.6; if (Math.hypot(a.pos.x - tpos.x, a.pos.z - tpos.z) < 1.5) { a.state = 'idle'; a.timer = 2 + Math.random() * 4; } }
+      case 'mob': {
+        const o = t.agent;
+        if (!o || o.dead) { a.timer = 0; break; }
+        // circle above the predator, diving and calling
+        const ang = (performance.now() / 1000) * 1.3 + a.id;
+        a.goal.set(o.pos.x + Math.cos(ang) * 4, o.pos.y + 2.5, o.pos.z + Math.sin(ang) * 4);
+        hasGoal = true; speed = air ? fly : run; a.action = 'call';
+        if (Math.random() < dt * 0.6) this.call(a, 'alarm');
+        if (Math.random() < dt * 0.3) o.needs.fear = Math.min(1, o.needs.fear + 0.2);
         break;
       }
-      case 'stalk': {
-        const p = this.game.player.pos;
-        const d = a.pos.distanceTo(p);
-        const ang = Math.atan2(a.pos.z - p.z, a.pos.x - p.x) + 0.02;
-        tx = p.x + Math.cos(ang) * 16; tz = p.z + Math.sin(ang) * 16;
-        speed = d > 18 ? beh.speed.run * 0.7 : beh.speed.walk * 0.6;
-        a.look = 0;
+      case 'defend': {
+        const o = t.agent;
+        if (!o || o.dead) { a.timer = 0; break; }
+        a.goal.copy(o.pos); hasGoal = true; speed = air ? fly : run * 0.8; a.action = 'display';
+        if (o.pos.distanceTo(a.pos) < 2 + a.scale) { o.needs.fear = 0.9; o.thinkT = 0; a.action = 'attack'; }
         break;
       }
-      case 'charge': {
-        const pl = this.game.player;
-        tx = pl.pos.x; tz = pl.pos.z; ty = pl.pos.y;
-        speed = beh.speed.run * 1.25;
-        a.timer -= dt;
-        if (a.pos.distanceTo(pl.pos) < 1.6 + a.scale * 0.4) {
-          pl.hurt(16, 'creature');
-          const dx = pl.pos.x - a.pos.x, dz = pl.pos.z - a.pos.z; const l = Math.hypot(dx, dz) || 1;
-          pl.vel.x += dx / l * 9; pl.vel.z += dz / l * 9; pl.vel.y += 4;
-          a.strike = 0.4;
-          a.state = 'retreat'; a.timer = 30; this.emit('attack-player', { a });
+      case 'guard': {
+        // threat display, then dive passes (fliers) or lunges (climbers) until the explorer backs off
+        const p = this.playerAgent.pos;
+        const d = p.distanceTo(a.pos);
+        if (t.pos && p.distanceTo(t.pos) > t.r + 5) { a.timer = 0; break; }
+        a.lookAt = p;
+        a.guardT = (a.guardT || 0) - dt;
+        a.strikeCd = Math.max(0, (a.strikeCd || 0) - dt);
+        if (air || a.ph.stats.fly > 0) {
+          if (!air && d < 14) { a.mode = 'air'; a.vel.copy(a.up).multiplyScalar(3); }
+          // swoop in, then climb away and turn for another pass
+          if (a.guardT <= 0) { a.guardT = 2.6; a.swoop = !a.swoop; }
+          if (a.swoop) a.goal.set(p.x, p.y + 1.4, p.z);
+          else a.goal.set(p.x + Math.cos(a.id) * 9, p.y + 7, p.z + Math.sin(a.id) * 9);
+          hasGoal = true; speed = fly * (a.swoop ? 1.25 : 0.9); a.action = a.swoop ? 'attack' : 'call';
+        } else {
+          a.goal.copy(p); hasGoal = d > 1.6; speed = run * 0.85; a.action = d < 4 ? 'attack' : 'display';
         }
-        if (a.timer <= 0) { a.state = 'retreat'; a.timer = 20; }
+        if (d < 1.5 + a.scale * 0.5 && a.strikeCd <= 0 && this.player && this.player.mode !== 'dead') {
+          a.strikeCd = 2.5;
+          if (air) a.swoop = false;
+          // small birds only harass; raptors and the larger climbers draw blood
+          const dmg = Math.round(a.ph.scale * 4.5);
+          if (dmg > 0) this.player.hurt(dmg, 'creature');
+          this.emit('guard-strike', { a });
+          this.call(a, 'threat');
+        } else if (Math.random() < dt * 0.5) this.call(a, 'alarm');
         break;
       }
-      case 'retreat': {
-        const p = this.game.player.pos;
-        const dx = a.pos.x - p.x, dz = a.pos.z - p.z; const l = Math.hypot(dx, dz) || 1;
-        tx = a.pos.x + dx / l * 10; tz = a.pos.z + dz / l * 10; speed = beh.speed.run * 0.8;
-        a.timer -= dt;
-        if (a.timer <= 0) { a.state = 'wander'; a.timer = 5; }
+      case 'investigate': {
+        const p = this.playerAgent.pos;
+        const d = p.distanceTo(a.pos);
+        const keep = 5 + a.scale * 3;
+        if (d > keep) { a.goal.copy(p); hasGoal = true; speed = walk * 0.7; }
+        a.action = 'alert';
+        a.lookAt = p;
         break;
       }
-      default: break;
-    }
-    // steering
-    let moveX = 0, moveZ = 0;
-    if (tx !== null && speed > 0) {
-      const dx = tx - a.pos.x, dz = tz - a.pos.z;
-      const d = Math.hypot(dx, dz);
-      if (d > 0.05) {
-        const desired = Math.atan2(dz, dx);
-        const turn = wrapAngle(desired - a.heading);
-        const turnRate = 3.5 / Math.max(0.5, Math.sqrt(a.scale));
-        a.heading += clamp(turn, -turnRate * dt, turnRate * dt);
-        const align = Math.max(0, Math.cos(turn));
-        const sp2 = speed * (0.35 + 0.65 * align);
-        moveX = Math.cos(a.heading) * sp2; moveZ = Math.sin(a.heading) * sp2;
+      case 'stalk': case 'charge': {
+        const p = this.playerAgent.pos;
+        const d = p.distanceTo(a.pos);
+        a.goal.copy(p); hasGoal = true;
+        if (a.state === 'stalk') {
+          speed = walk * 0.7; a.action = 'alert';
+          a.stalkT = (a.stalkT || 0) + dt;
+          if (d < 9 || a.stalkT > 22) { a.state = 'charge'; a.timer = 6; this.call(a, 'hunt'); this.emit('charge-player', { a }); }
+        } else {
+          speed = run; a.action = 'attack';
+          if (d < 1.6 + a.scale * 0.4 && this.player && this.player.hurt) {
+            a.strike += dt;
+            if (a.strike > 0.8) { a.strike = 0; this.player.hurt(16, 'creature'); this.emit('attack-player', { a }); a.state = 'wander'; a.timer = 8; a.stalkT = 0; }
+          }
+        }
+        break;
+      }
+      default: {
+        // wander: a slowly drifting heading inside the home range
+        if (!a.wanderPt || a.wanderPt.distanceTo(a.pos) < 1.5 || Math.random() < dt * 0.1) {
+          a.wanderPt = a.wanderPt || new THREE.Vector3();
+          const r = air ? 40 : 10 + a.scale * 6;
+          let base = a.home && a.home.kind !== 'range' && a.pos.distanceTo(a.home.pos) > 50 ? a.home.pos : a.pos;
+          // the local population stays local: strays turn back toward the explorer's
+          // surroundings instead of drifting off and being folded back into the pool
+          const P = this.playerAgent.pos;
+          if (a.pos.distanceTo(P) > ACTIVE_R) base = _lv.lerpVectors(a.pos, P, 0.45);
+          a.wanderPt.set(base.x + (Math.random() - 0.5) * 2 * r, base.y + (air ? (Math.random() - 0.5) * 20 : 0), base.z + (Math.random() - 0.5) * 2 * r);
+          for (const at of this.attractors) if (at.pos.distanceTo(a.pos) < 35 && a.sp.behavior.diet !== 'carnivore') a.wanderPt.copy(at.pos);
+          // keep away from where something frightened it
+          if (a.avoidT > 0 && a.wanderPt.distanceTo(a.avoid) < 25) { _v.subVectors(a.wanderPt, a.avoid).setY(0); if (_v.lengthSq() < 1e-3) _v.set(1, 0, 0); a.wanderPt.copy(a.avoid).addScaledVector(_v.normalize(), 28); }
+        }
+        a.goal.copy(a.wanderPt); hasGoal = true; speed = air ? fly * 0.7 : walk * 0.55;
       }
     }
-    // keep within reach of home (stay in the habitat)
-    const fromHome = Math.hypot(a.pos.x - a.home.x, a.pos.z - a.home.z);
-    if (fromHome > 90 && a.state !== 'flee' && a.state !== 'hunt' && a.state !== 'stalk' && a.state !== 'charge') {
-      a.state = 'wander'; a.target = { pos: a.home.clone() }; a.timer = 8;
-    }
-    const nx = a.pos.x + moveX * dt, nz = a.pos.z + moveZ * dt;
-    let moved = Math.hypot(moveX, moveZ);
-    // vertical placement by locomotion
-    if (a.airborne) {
-      const floor = W.floorBelow(nx, a.pos.y, nz);
-      let alt = a.state === 'forage' || a.state === 'eat' || a.state === 'goto-carcass' ? 0.6 : a.flyAlt || 8;
-      if (a.state === 'idle' || a.state === 'sleep') alt = 0.05; // perched
-      const groundY = floor === -Infinity ? a.pos.y - 20 : floor;
-      let targetY = ty !== null && (a.state === 'hunt' || a.state === 'symbiosis') ? ty + 0.5 : groundY + alt;
-      if (a.band === BANDS.SHAFT) targetY = clamp(a.home.y + Math.sin(t * 0.2 + a.seed) * 15, groundY + 4, a.home.y + 40);
-      const ceil = W.ceilingAbove(nx, a.pos.y + 0.5, nz);
-      if (targetY > ceil - 2) targetY = ceil - 2;
-      const ok = !W.isSolid(nx, a.pos.y, nz);
-      if (ok) { a.pos.x = nx; a.pos.z = nz; } else { a.heading += Math.PI * 0.6; moved = 0; }
-      a.pos.y += clamp(targetY - a.pos.y, -6 * dt, 4 * dt);
-      a.gliding = sp.behavior.locomotion === 'glide' || (moved > 0 && a.pos.y > targetY + 1);
-      a.perched = alt < 0.1 && Math.abs(a.pos.y - targetY) < 0.3;
-    } else if (a.ceil) {
-      const c = W.ceilingAbove(nx, a.pos.y - 1.5, nz);
-      if (c < Infinity && Math.abs(c - a.pos.y) < 2.5) { a.pos.x = nx; a.pos.z = nz; a.pos.y = c; } else { a.heading += Math.PI * 0.7; moved = 0; }
-    } else {
-      const fy = W.floorBelow(nx, a.pos.y + 1.2, nz);
-      const dy = fy - a.pos.y;
-      const water = W.columnAt(nx, nz).water;
-      const wet = !Number.isNaN(water) && water > fy + 0.6 && !sp.behavior.habitat.includes('water');
-      if (fy > -Infinity && dy > -2.6 && dy < 1.25 && !wet && W.ceilingAbove(nx, fy + 0.2, nz) - fy > Math.min(2.2, a.scale * 0.8 + 0.4)) {
-        a.pos.x = nx; a.pos.z = nz; a.pos.y = lerp(a.pos.y, fy, Math.min(1, dt * 12));
-      } else {
-        a.heading += Math.PI * (0.5 + Math.random() * 0.5);
-        moved = 0;
-        if (a.state === 'wander') { a.state = 'idle'; a.timer = 1; }
-      }
-    }
-    a.animSpeed = lerp(a.animSpeed, moved, Math.min(1, dt * 6));
-    // separation from others of the group
-    // orientation & placement of the visual
-    const mesh = a.obj.mesh;
-    mesh.position.copy(a.pos);
-    if (a.ceil) { mesh.rotation.set(0, -a.heading + Math.PI / 2, Math.PI); }
-    else {
-      mesh.rotation.set(0, -a.heading + Math.PI / 2, 0);
-      if (a.airborne && !a.perched) mesh.rotation.x = -clamp((a.vel.y || 0) * 0.05, -0.3, 0.3);
-    }
-    a.vel.set(moveX, 0, moveZ);
-    // head looks at the target
-    if (tpos) { const ang = Math.atan2(tpos.z - a.pos.z, tpos.x - a.pos.x); a.look = clamp(wrapAngle(ang - a.heading), -0.8, 0.8); }
-    else a.look *= 0.95;
+    a.hasGoal = hasGoal;
+    a.wantSpeed = speed;
   }
 
-  // ------------------------------------------------------------------ queries & persistence
-  agentsNear(pos, r) { return this.agents.filter((a) => !a.dead && a.pos.distanceTo(pos) < r); }
+  forageKind(a) {
+    const d = a.sp.behavior.diet;
+    if (d === 'grazer') return 'grass';
+    if (d === 'browser') return 'moss';
+    if (d === 'lithophage') return 'minerals';
+    if (d === 'lichen') return 'lichen';
+    if (d === 'nectar') return 'flowers';
+    if (d === 'piscivore') return 'fish';
+    return 'insects';
+  }
 
+  /** Arrive at home: perch, roost upside down, cling to the wall or rest in the den. */
+  settle(a) {
+    const h = a.home;
+    if (!h) return;
+    a.vel.set(0, 0, 0);
+    if (h.kind === 'roost') { a.mode = 'hang'; a.pos.copy(h.pos); a.pos.y -= a.scale * 0.3; }
+    else if (h.kind === 'wall') { a.mode = 'wall'; a.phi = Math.atan2(-h.nz, -h.nx); a.pos.copy(h.pos); }
+    else if (h.kind === 'ledge') { a.mode = a.sp.behavior.habitat === 'wall' ? 'ground' : 'perch'; a.pos.copy(h.pos); }
+    else if (h.kind === 'den') { a.pos.copy(h.pos); }
+    else if (h.kind === 'ground') { a.mode = 'perch'; a.pos.copy(h.pos); }
+  }
+
+  /** Eggs and young at the nest. */
+  tendNest(a, dt) {
+    a.action = 'idle';
+    a.eggT -= dt;
+    if (a.nestEggs > 0 && a.eggT <= 0) {
+      const n = a.nestEggs;
+      a.nestEggs = 0;
+      a.broodT = 90;
+      if (a.mate && !a.mate.dead) a.mate.broodT = 90;
+      const mate = a.mate && !a.mate.dead ? a.mate : a;
+      for (let k = 0; k < n && this.agents.length < this.maxAgents + 6; k++) this.birth(a, mate, a.home.pos);
+    }
+  }
+
+  mate(f, m) {
+    const R = f.sp.behavior.reproduction;
+    f.needs.mate = 0; m.needs.mate = 0;
+    f.mate = m; m.mate = f;
+    f.state = 'idle'; m.state = 'idle'; f.timer = 3; m.timer = 3;
+    this.emit('court', { a: m, b: f });
+    if (this.agents.length >= this.maxAgents + 6) return;
+    if (R.eggs && f.home && f.home.kind !== 'range') {
+      // eggs at the nest; the parents tend them until they hatch
+      f.nestEggs = R.clutch; f.eggT = 40 + Math.random() * 30;
+      f.state = 'nest'; f.target = { pos: f.home.pos, kind: 'nest' }; f.timer = 60;
+      this.emit('nest', { a: f });
+    } else {
+      for (let k = 0; k < R.clutch; k++) this.birth(f, m, f.pos);
+    }
+  }
+
+  birth(f, m, at) {
+    const rng = f.S.rng;
+    const genes = inheritGenes(f.sp, f.genes, m.genes, rng);
+    const pos = { x: at.x + (Math.random() - 0.5), y: at.y, z: at.z + (Math.random() - 0.5), mode: f.mode === 'hang' ? 'hang' : f.mode === 'air' ? 'perch' : f.mode, node: f.node, phi: f.phi };
+    const y = this.spawn(f.S, pos, genes, { age: 1, parent: f, region: f.region });
+    y.group = f.group; y.leader = f.leader || f; y.home = f.home;
+    y.needs.hunger = 0.2;
+    this.stats.births++;
+    // the newborn's genes join the regional pool: the population drifts as it breeds
+    if (f.region) { const pool = f.region.pools[f.sp.id] || (f.region.pools[f.sp.id] = []); pool.push(genes); if (pool.length > POOL) pool.shift(); }
+    this.emit('birth', { a: f, young: y });
+  }
+
+  // ------------------------------------------------------------------ movement
+  move(a, dt) {
+    switch (a.mode) {
+      case 'cave': this.moveCave(a, dt); break;
+      case 'wall': this.moveWall(a, dt); break;
+      case 'air': this.moveAir(a, dt); break;
+      case 'hang': case 'perch': this.moveRest(a, dt); break;
+      default: this.moveGround(a, dt); break;
+    }
+  }
+
+  steerYaw(a, dx, dz, dt, rate = 3) {
+    if (dx * dx + dz * dz < 1e-6) { a.turn = 0; return; }
+    const want = Math.atan2(dx, dz);
+    let d = want - a.yaw;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    const step = Math.max(-rate * dt, Math.min(rate * dt, d));
+    a.yaw += step;
+    a.turn = step / Math.max(1e-3, dt);
+  }
+
+  moveGround(a, dt) {
+    const H = this.hab;
+    if (!a.hasGoal) { a.speed = Math.max(0, a.speed - dt * 3); return; }
+    _v.subVectors(a.goal, a.pos); _v.y = 0;
+    const dist = _v.length();
+    let sp = a.wantSpeed * Math.min(1, dist / 1.5);
+    a.speed += (sp - a.speed) * Math.min(1, dt * 4);
+    this.steerYaw(a, _v.x, _v.z, dt, 2.5 + a.genes.c[G.agility] * 3);
+    const fx = Math.sin(a.yaw), fz = Math.cos(a.yaw);
+    const step = a.speed * dt;
+    if (step < 1e-4) return;
+    const nx = a.pos.x + fx * step, nz = a.pos.z + fz * step;
+    const maxStep = Math.max(0.5, a.scale * 0.45 + 0.3);
+    const ceilMode = a.mode === 'ceiling';
+    const f = H.floorNear(nx, a.pos.y, nz, maxStep + 0.6, ceilMode ? 3 : Math.max(0.8, a.scale * 0.6));
+    let ok = !!f;
+    if (ok && !ceilMode) {
+      if (f.y - a.pos.y > maxStep || a.pos.y - f.y > maxStep * 2.5) ok = false;
+      if (!Number.isNaN(f.water) && f.water > f.y + 0.4 && a.sp.behavior.habitat !== 'shore') ok = false;
+      if (ok && !this.sp[a.sp.id].bands.includes(H.bandAt(nx, f.y + 0.5, nz))) ok = false;
+    }
+    if (ceilMode && ok) { if (!(f.ceil < Infinity) || Math.abs(f.ceil - a.pos.y) > maxStep) ok = false; }
+    if (!ok) {
+      // blocked: turn away and pick a new goal
+      a.yaw += (Math.random() < 0.5 ? 1 : -1) * (0.8 + Math.random());
+      a.speed *= 0.3;
+      a.wanderPt = null; a.foragePt = null;
+      return;
+    }
+    const ny = ceilMode ? f.ceil : f.y;
+    a.pitch = Math.atan2(a.lastFloorY - ny, Math.max(0.05, step)) * 0.5;
+    a.pos.set(nx, a.pos.y + (ny - a.pos.y) * Math.min(1, dt * 12), nz);
+    a.lastFloorY = ny;
+  }
+
+  /** The cave network: walk from node to node along the passages. */
+  moveCave(a, dt) {
+    const C = this.hab.caves;
+    if (a.node < 0 || a.node >= C.nodes.length) { a.node = C.nearest(a.pos.x, a.pos.y, a.pos.z, 40); if (a.node < 0) { a.mode = 'ground'; return; } }
+    if (!a.hasGoal) { a.speed = Math.max(0, a.speed - dt * 3); }
+    else a.speed += (a.wantSpeed - a.speed) * Math.min(1, dt * 4);
+    const cur = C.nodes[a.node];
+    if (a.next < 0 || a.next >= C.nodes.length) {
+      // choose the neighbour that best serves the goal (or wander), avoiding going straight back
+      let best = -1, bs = -Infinity;
+      for (const n of cur.adj) {
+        const nd = C.nodes[n];
+        let s = Math.random() * 0.5 - (n === a.prev ? 1.5 : 0);
+        if (a.hasGoal) s -= Math.hypot(nd.x - a.goal.x, (nd.y - a.goal.y) * 1.5, nd.z - a.goal.z) * 0.05;
+        if (a.state === 'flee' && a.target && a.target.agent) s += Math.hypot(nd.x - a.target.agent.pos.x, nd.z - a.target.agent.pos.z) * 0.1;
+        if (s > bs) { bs = s; best = n; }
+      }
+      a.next = best;
+      if (best < 0) return;
+    }
+    const nx = C.nodes[a.next];
+    // lane offset keeps individuals from walking a single file line
+    const dx = nx.x - a.pos.x, dz = nx.z - a.pos.z;
+    const L = Math.hypot(dx, dz);
+    const lane = a.lane * Math.min(nx.r, cur.r) * 0.8;
+    const tx = nx.x + (-dz / (L || 1)) * lane, tz = nx.z + (dx / (L || 1)) * lane;
+    this.steerYaw(a, tx - a.pos.x, tz - a.pos.z, dt, 4);
+    const step = a.speed * dt;
+    if (L < Math.max(0.8, step * 1.5)) { a.prev = a.node; a.node = a.next; a.next = -1; return; }
+    const fx = Math.sin(a.yaw), fz = Math.cos(a.yaw);
+    const px = a.pos.x + fx * step, pz = a.pos.z + fz * step;
+    const yRef = cur.y + (nx.y - cur.y) * clamp(1 - L / Math.max(1, Math.hypot(nx.x - cur.x, nx.z - cur.z)), 0, 1);
+    const f = this.hab.floorNear(px, yRef + 0.5, pz, 2.5, 0.6);
+    if (!f) { a.yaw += 0.6; return; }
+    a.pitch = Math.atan2(a.pos.y - f.y, Math.max(0.05, step)) * 0.5;
+    a.pos.set(px, a.pos.y + (f.y - a.pos.y) * Math.min(1, dt * 12), pz);
+    if (a.hasGoal && a.goal.distanceTo(a.pos) < 1.5) a.next = -1;
+  }
+
+  /** The chasm walls: (angle, height) on the rock face. */
+  moveWall(a, dt) {
+    const p = this.plan.params.chasm;
+    if (!a.hasGoal) { a.speed = Math.max(0, a.speed - dt * 3); }
+    else a.speed += (a.wantSpeed * 0.8 - a.speed) * Math.min(1, dt * 4);
+    let R = this.hab.chasm.wallDist(a.phi, a.pos.y);
+    if (R <= 0) { a.mode = 'air'; return; }
+    let vt = 0, vy = 0;
+    if (a.hasGoal) {
+      const [cx, cz] = this.hab.chasm.centreAt(a.pos.y);
+      const gphi = Math.atan2(a.goal.z - cz, a.goal.x - cx);
+      let dphi = gphi - a.phi;
+      while (dphi > Math.PI) dphi -= Math.PI * 2;
+      while (dphi < -Math.PI) dphi += Math.PI * 2;
+      const dt_ = dphi * R, dy = a.goal.y - a.pos.y;
+      const l = Math.hypot(dt_, dy) || 1;
+      vt = (dt_ / l) * a.speed; vy = (dy / l) * a.speed;
+      a.wallDir = Math.atan2(vt, vy);
+    }
+    a.phi += (vt * dt) / Math.max(20, R);
+    let y = clamp(a.pos.y + vy * dt, p.floorY + 22, p.yWide - 4);
+    this.hab.wallPoint(a.phi, y, a.pos, a.up);
+    a.turn = 0;
+    // gliders launch from the wall to cross to a lower ledge
+    if (a.sp.plan === 'glider' && a.state === 'wander' && Math.random() < dt * 0.02) { a.mode = 'air'; a.vel.copy(a.up).multiplyScalar(3); a.gliding = true; this.emit('glide', { a }); }
+    void R;
+  }
+
+  /** Open air: steering with avoidance of walls, floors and ceilings. */
+  moveAir(a, dt) {
+    const st = a.ph.stats;
+    const flySpeed = st.fly || st.walk * 3;
+    let want = a.hasGoal ? a.wantSpeed : flySpeed * 0.6;
+    // desired velocity toward the goal
+    if (a.hasGoal) _v.subVectors(a.goal, a.pos);
+    else _v.copy(a.vel);
+    if (_v.lengthSq() < 1e-4) _v.set(Math.sin(a.yaw), 0, Math.cos(a.yaw));
+    _v.normalize().multiplyScalar(want);
+    // gliders and soarers sink slowly
+    if (a.gliding || a.sp.behavior.locomotion === 'glide') _v.y = Math.min(_v.y, -0.6);
+    // avoidance
+    const ch = this.hab.chasm, p = this.plan.params;
+    if (a.sp.layer === 'layer3') {
+      _v2.copy(a.pos).addScaledVector(a.vel, 1.2);
+      const c = ch.clearance(_v2.x, _v2.y, _v2.z);
+      if (c > -9) {
+        const [cx, cz] = ch.centreAt(a.pos.y);
+        _v3.set(cx - a.pos.x, 0, cz - a.pos.z).normalize();
+        _v.addScaledVector(_v3, (c + 9) * 0.9);
+        // a glider reaching the wall clings to it
+        if (a.sp.behavior.habitat === 'wall' && c > -2) { a.mode = 'wall'; a.phi = Math.atan2(a.pos.z - cz, a.pos.x - cx); a.gliding = false; return; }
+      }
+      if (a.pos.y < p.chasm.floorY + 12) _v.y += 3;
+      if (a.pos.y > p.chasm.yThroat - 12) _v.y -= 3;
+    } else {
+      const f = this.hab.floorNear(a.pos.x, a.pos.y, a.pos.z, 400, 2);
+      if (f) {
+        if (a.pos.y - f.y < 3) _v.y += 3;
+        if (f.ceil < Infinity && f.ceil - a.pos.y < 3) _v.y -= 3;
+      }
+      if (this.world.isSolid(a.pos.x + a.vel.x * 0.6, a.pos.y + a.vel.y * 0.6, a.pos.z + a.vel.z * 0.6)) { _v.y += 4; _v.x -= a.vel.x * 1.5; _v.z -= a.vel.z * 1.5; }
+    }
+    const turnRate = 1.6 + a.genes.c[G.agility] * 2.5;
+    a.vel.lerp(_v, Math.min(1, dt * turnRate));
+    const sp = a.vel.length();
+    if (sp > flySpeed * 1.8) a.vel.multiplyScalar((flySpeed * 1.8) / sp);
+    a.pos.addScaledVector(a.vel, dt);
+    const oldYaw = a.yaw;
+    if (a.vel.x * a.vel.x + a.vel.z * a.vel.z > 0.01) this.steerYaw(a, a.vel.x, a.vel.z, dt, 6);
+    a.bank += ((-(a.yaw - oldYaw) / Math.max(1e-3, dt)) * 0.35 - a.bank) * Math.min(1, dt * 4);
+    a.pitch = Math.atan2(-a.vel.y, Math.hypot(a.vel.x, a.vel.z)) * 0.7;
+    a.speed = sp;
+    a.flapping = a.vel.y > -0.3 || sp < flySpeed * 0.6 || a.sp.behavior.locomotion === 'hover' || a.sp.behavior.locomotion === 'flutter';
+    if (a.sp.behavior.locomotion === 'soar' && a.vel.y < 0.4 && sp > flySpeed * 0.5) a.flapping = Math.sin(performance.now() / 1300 + a.id) > 0.7;
+  }
+
+  /** Perched, roosting or hanging at home; leave when the action needs to move. */
+  moveRest(a, dt) {
+    a.speed = 0;
+    if (a.hasGoal && a.state !== 'roost' && a.state !== 'nest') {
+      const flier = a.ph.wings.type === 'feather' || a.ph.wings.type === 'membrane';
+      if (flier) { a.vel.set(0, a.mode === 'hang' ? -1 : 1.5, 0); a.mode = 'air'; }
+      else if (a.sp.behavior.habitat === 'wall') a.mode = 'wall';
+      else if (a.sp.behavior.habitat === 'cave') a.mode = 'cave';
+      else a.mode = 'ground';
+    }
+    void dt;
+  }
+
+  // ------------------------------------------------------------------ rendering
+  /** Orientation of the body from its mode: upright, on the wall, upside down. */
+  place(a) {
+    const root = a.obj.root;
+    root.position.copy(a.pos);
+    if (a.mode === 'wall') {
+      // body lies on the rock: up = wall normal, forward along the climb direction
+      const n = a.up;
+      const tx = -n.z, tz = n.x; // horizontal tangent
+      const ang = a.wallDir ?? 0;
+      _v.set(tx * Math.sin(ang), Math.cos(ang), tz * Math.sin(ang)).normalize();
+      _v2.crossVectors(n, _v).normalize();
+      _m.makeBasis(_v2, n, _v);
+      root.quaternion.setFromRotationMatrix(_m);
+      return;
+    }
+    _q.setFromAxisAngle(UP, a.yaw);
+    root.quaternion.copy(_q);
+    _v.set(1, 0, 0).applyQuaternion(_q);
+    root.quaternion.premultiply(_q.setFromAxisAngle(_v, a.pitch));
+    if (a.mode === 'air') { _v.set(0, 0, 1).applyAxisAngle(UP, a.yaw); root.quaternion.premultiply(_q.setFromAxisAngle(_v, a.bank)); }
+    if (a.mode === 'ceiling' || a.mode === 'hang') { _v.set(0, 0, 1).applyAxisAngle(UP, a.yaw); root.quaternion.premultiply(_q.setFromAxisAngle(_v, Math.PI)); }
+  }
+
+  animate(a, dt) {
+    const air = a.mode === 'air';
+    let mode = 'ground';
+    if (air) mode = a.flapping ? (a.sp.behavior.locomotion === 'hover' ? 'hover' : 'fly') : 'glide';
+    else if (a.state === 'sleep') mode = 'sleep';
+    else if (a.state === 'rest' || (a.state === 'idle' && a.speed < 0.05 && a.needs.energy < 0.4)) mode = 'rest';
+    let lookYaw = 0, lookPitch = 0;
+    const lt = a.lookAt || (a.target && a.target.agent ? a.target.agent.pos : null);
+    if (lt && a.mode !== 'wall') {
+      _v.subVectors(lt, a.pos);
+      let d = Math.atan2(_v.x, _v.z) - a.yaw;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      lookYaw = d;
+      lookPitch = Math.atan2(_v.y, Math.hypot(_v.x, _v.z));
+    } else if (a.lookAround) lookYaw = a.lookAround;
+    a.lookAt = null;
+    a.anim.update(dt, {
+      speed: air ? a.speed : a.speed / Math.max(0.3, a.ageScale), mode,
+      action: a.calling > 0 && a.action === 'idle' ? 'call' : a.action,
+      lookYaw, lookPitch, turn: a.turn, bank: a.bank, flap: a.flapping ? 1 : 0, hop: a.sp.behavior.locomotion === 'hop',
+    });
+  }
+
+  // ------------------------------------------------------------------ text helpers for the HUD
+  stateLabel(a) { return ACTION_LABEL[a.state] || a.state; }
+
+  // ------------------------------------------------------------------ save / load
   serialize() {
     const regions = [];
     for (const r of this.regions.values()) {
       if (!r.init) continue;
-      if (r.active) {
-        const counts = new Float32Array(this.species.length);
-        for (const a of this.agents) if (a.region === r.key && !a.dead) counts[a.sp.id] += a.juvenile ? 0.5 : 1;
-        regions.push([r.key, Array.from(counts).map((v) => Math.round(v * 100) / 100)]);
-      } else regions.push([r.key, Array.from(r.pops).map((v) => Math.round(v * 100) / 100)]);
+      regions.push([r.key, r.x, r.y, r.z, r.band, Array.from(r.pops, (v) => Math.round(v * 100) / 100)]);
     }
-    return { regions, stats: this.stats };
+    return { v: 2, regions, stats: this.stats };
   }
 
-  restore(data) {
-    if (!data) return;
-    for (const [key, pops] of data.regions || []) {
-      const [b, i, j] = key.split(':').map(Number);
-      const r = this.getRegion(b, i, j);
-      this.initRegion(r);
-      pops.forEach((v, k) => { if (k < r.pops.length) r.pops[k] = v; });
+  restore(s) {
+    if (!s || s.v !== 2) return;
+    for (const [key, x, y, z, band, pops] of s.regions || []) {
+      const r = this.region(key, x, y, z, band);
+      for (let i = 0; i < pops.length && i < r.pops.length; i++) r.pops[i] = pops[i];
     }
-    if (data.stats) this.stats = { ...this.stats, ...data.stats };
+    if (s.stats) Object.assign(this.stats, s.stats);
   }
 }
+
+export { lerp };

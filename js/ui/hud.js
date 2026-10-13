@@ -2,9 +2,11 @@
 // markers, depth/layer readout, health and stamina, notifications, layer
 // banners, interaction prompts, the observation panel and worn artifacts.
 import { LAYERS } from '../world/layers.js';
-import { FAMILY_LABEL } from '../creatures/genetics.js';
+import { FAMILY_LABEL } from '../creatures/genome.js';
+import { ACTION_LABEL } from '../creatures/brain.js';
 import { FULL_OBSERVATION } from '../systems/discovery.js';
 import { clamp, wrapAngle } from '../core/mathutil.js';
+import { GLYPH } from '../core/gamepad.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const CARD = [['N', 0], ['NE', Math.PI / 4], ['E', Math.PI / 2], ['SE', Math.PI * 0.75], ['S', Math.PI], ['SW', -Math.PI * 0.75], ['W', -Math.PI / 2], ['NW', -Math.PI / 4]];
@@ -189,20 +191,22 @@ export class HUD {
 
   updatePrompt(p) {
     const g = this.game;
-    const t = !!g.touch;
+    const pad = !!g.pad, t = !pad && !!g.touch;
     let txt = '';
     const A = g.artifacts;
     if (A && A.focus && p.mode !== 'dead') {
       const a = A.focus.art;
-      txt = `${t ? '<b>Take</b>' : '<kbd>E</kbd> Take'} the ${esc(a.name)} <span class="muted">(${a.gradeLabel})</span>`;
+      txt = `${pad ? `${GLYPH.square} Take` : t ? '<b>Take</b>' : '<kbd>E</kbd> Take'} the ${esc(a.name)} <span class="muted">(${a.gradeLabel})</span>`;
     } else if (g.discovery.focus && !p.zoomed && p.mode !== 'dead') {
       const a = g.discovery.focus;
       const known = g.discovery.known(a.sp.id);
-      txt = `${t ? 'Hold <b>Observe</b> to study' : '<kbd>F</kbd> Observe'} ${known ? esc(a.sp.name) : 'the creature'}`;
+      txt = `${pad ? `Hold ${GLYPH.triangle} Observe` : t ? 'Hold <b>Observe</b> to study' : '<kbd>F</kbd> Observe'} ${known ? esc(a.sp.name) : 'the creature'}`;
     } else if (g.grapple && g.grapple.attached) {
-      txt = t ? 'Hold <b>Reel in</b> or <b>Pay out</b> · <b>Jump</b> to let go' : '<kbd>RMB</kbd>/<kbd>Q</kbd> reel in · <kbd>Z</kbd> pay out · <kbd>Space</kbd> let go';
+      txt = pad ? `${GLYPH.L2} reel in · ${GLYPH.L1} pay out · ${GLYPH.cross} let go`
+        : t ? 'Hold <b>Reel in</b> or <b>Pay out</b> · <b>Jump</b> to let go' : '<kbd>RMB</kbd>/<kbd>Q</kbd> reel in · <kbd>Z</kbd> pay out · <kbd>Space</kbd> let go';
     } else if (p.mode === 'climb') {
-      txt = t ? 'Push up or down to climb · <b>Leap</b> off · <b>Drop</b>' : '<kbd>W</kbd>/<kbd>S</kbd> climb · <kbd>Space</kbd> leap off · <kbd>Ctrl</kbd> drop';
+      txt = pad ? `Stick up or down to climb · ${GLYPH.cross} leap off · ${GLYPH.circle} drop`
+        : t ? 'Push up or down to climb · <b>Leap</b> off · <b>Drop</b>' : '<kbd>W</kbd>/<kbd>S</kbd> climb · <kbd>Space</kbd> leap off · <kbd>Ctrl</kbd> drop';
     }
     this.set('.prompt', txt);
   }
@@ -221,8 +225,9 @@ export class HUD {
     }
     const e = g.discovery.species.get(a.sp.id);
     this.set('.ob-name', esc(a.sp.name));
-    this.set('.ob-sub', `${FAMILY_LABEL[a.sp.family]} · ${a.juvenile ? 'juvenile' : a.sex === 'f' ? 'female' : 'male'} · ${Math.round(a.pos.distanceTo(p.pos))} m`);
-    const act = { forage: 'feeding', flee: 'fleeing', hunt: 'hunting', sleep: 'sleeping', court: 'courting', drink: 'drinking', eat: 'eating', flock: 'with its group', follow: 'following its parent', wander: 'wandering', idle: 'resting', chase: 'chasing a rival', symbiosis: 'beside its host', 'goto-carcass': 'heading for a carcass', stalk: 'stalking you', charge: 'charging!', retreat: 'retreating' }[a.state] || a.state;
+    const form = e && a.sub > 0 && a.sp.subspecies[a.sub] ? ` · ${esc(a.sp.subspecies[a.sub].name)} form` : '';
+    this.set('.ob-sub', `${FAMILY_LABEL[a.sp.family]} · ${a.juvenile ? 'juvenile' : a.sex === 'f' ? 'female' : 'male'}${form} · ${Math.round(a.pos.distanceTo(p.pos))} m`);
+    const act = ACTION_LABEL[a.state] || a.state;
     this.set('.ob-act', `Currently ${act}`);
     ob.querySelector('.bar i').style.width = `${e ? Math.min(100, (e.observe / FULL_OBSERVATION) * 100) : 0}%`;
   }
@@ -236,7 +241,7 @@ export class HUD {
       const a = A.byId.get(id);
       const cd = A.cooldowns.get(id) || 0;
       const isActive = active && active.id === id;
-      return `<div class="hs ${isActive ? 'active' : ''}" title="${esc(a.name)}"><span class="grade g${a.grade}">${['IV', 'III', 'II', 'I', '✶'][a.grade]}</span>${isActive ? `${this.game.touch ? '' : '<kbd>R</kbd>'}${cd > 0 ? `<b>${Math.ceil(cd)}</b>` : ''}` : ''}</div>`;
+      return `<div class="hs ${isActive ? 'active' : ''}" title="${esc(a.name)}"><span class="grade g${a.grade}">${['IV', 'III', 'II', 'I', '✶'][a.grade]}</span>${isActive ? `${this.game.pad ? GLYPH.down : this.game.touch ? '' : '<kbd>R</kbd>'}${cd > 0 ? `<b>${Math.ceil(cd)}</b>` : ''}` : ''}</div>`;
     }).join('');
     this.set('.slots-hud', html);
   }

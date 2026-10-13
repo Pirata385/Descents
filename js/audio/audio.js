@@ -12,7 +12,10 @@ const LAYER_MUSIC = [
   { root: 164.81, scale: [0, 2, 3, 5, 7, 9, 10], chordLen: [10, 15], pad: 'airy', lead: 'pluck', density: 0.3, bright: 1900 }, // layer 1
   { root: 138.59, scale: [0, 2, 3, 7, 8], chordLen: [12, 18], pad: 'glass', lead: 'bell', density: 0.22, bright: 1300 },       // layer 2
   { root: 110.0, scale: [0, 1, 5, 6, 8], chordLen: [14, 22], pad: 'dark', lead: 'bell', density: 0.12, bright: 700 },          // layer 3
+  { root: 123.47, scale: [0, 2, 4, 6, 7, 11], chordLen: [16, 24], pad: 'choir', lead: 'chime', density: 0.16, bright: 2600 },  // layer 4
 ];
+// wind strength in the open, per layer
+const LAYER_WIND = [0.5, 0.4, 0.16, 0.22, 0.05];
 
 export class AudioEngine {
   constructor(settings) {
@@ -41,14 +44,32 @@ export class AudioEngine {
     this.amb = ctx.createGain(); this.amb.connect(this.master);
     this.sfx = ctx.createGain(); this.sfx.connect(this.master);
     this.uiBus = ctx.createGain(); this.uiBus.connect(this.master);
-    // reverb (caves and the great open spaces)
+    // reverb: a tight one for caves and tunnels, a vast one for the chasm and
+    // the galleries, and a slap-back echo off the far wall of the Great Fault
     this.reverb = ctx.createConvolver();
-    this.reverb.buffer = this.impulse(3.2, 2.4);
+    this.reverb.buffer = this.impulse(2.2, 2.6);
     this.reverbOut = ctx.createGain(); this.reverbOut.gain.value = 0.6;
     this.reverb.connect(this.reverbOut).connect(this.master);
+    this.reverbBig = ctx.createConvolver();
+    this.reverbBig.buffer = this.impulse(5.5, 3.2, 0.06);
+    this.reverbBigOut = ctx.createGain(); this.reverbBigOut.gain.value = 0.5;
+    this.reverbBig.connect(this.reverbBigOut).connect(this.master);
+    this.echo = ctx.createDelay(2); this.echo.delayTime.value = 0.7;
+    const fb = ctx.createGain(); fb.gain.value = 0.34;
+    const elp = ctx.createBiquadFilter(); elp.type = 'lowpass'; elp.frequency.value = 1700;
+    this.echoIn = ctx.createGain(); this.echoIn.gain.value = 0;
+    this.echoIn.connect(this.echo).connect(elp).connect(fb).connect(this.echo);
+    elp.connect(this.master);
     this.sfxSend = ctx.createGain(); this.sfxSend.gain.value = 0.15; this.sfxSend.connect(this.reverb);
+    this.sfxSendBig = ctx.createGain(); this.sfxSendBig.gain.value = 0; this.sfxSendBig.connect(this.reverbBig);
+    this.sfx.connect(this.sfxSend);
+    this.sfx.connect(this.sfxSendBig);
     this.musicSend = ctx.createGain(); this.musicSend.gain.value = 0.35; this.musicSend.connect(this.reverb);
+    this.musicSendBig = ctx.createGain(); this.musicSendBig.gain.value = 0; this.musicSendBig.connect(this.reverbBig);
     this.music.connect(this.musicSend);
+    this.music.connect(this.musicSendBig);
+    this.bigSend = 0;
+    this.echoAmt = 0;
     // noise sources
     this.white = this.noiseBuffer('white');
     this.brown = this.noiseBuffer('brown');
@@ -86,12 +107,19 @@ export class AudioEngine {
     return buf;
   }
 
-  impulse(sec, decay) {
-    const ctx = this.ctx, n = Math.floor(ctx.sampleRate * sec);
+  impulse(sec, decay, predelay = 0) {
+    const ctx = this.ctx, n = Math.floor(ctx.sampleRate * sec), pd = Math.floor(ctx.sampleRate * predelay);
     const buf = ctx.createBuffer(2, n, ctx.sampleRate);
     for (let c = 0; c < 2; c++) {
       const d = buf.getChannelData(c);
-      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, decay);
+      // darker tail: a one-pole lowpass that closes as the sound decays
+      let lp = 0;
+      for (let i = pd; i < n; i++) {
+        const u = (i - pd) / (n - pd);
+        const k = 0.9 - 0.75 * u;
+        lp += ((Math.random() * 2 - 1) - lp) * k;
+        d[i] = lp * Math.pow(1 - u, decay);
+      }
     }
     return buf;
   }
@@ -120,6 +148,8 @@ export class AudioEngine {
       river: bed(this.pink, 'lowpass', 1400, 0.4),
       fall: bed(this.brown, 'lowpass', 520, 0.5),
       cave: bed(this.brown, 'lowpass', 160, 0.7),
+      howl: bed(this.pink, 'bandpass', 190, 9),
+      shimmer: bed(this.white, 'bandpass', 5200, 6),
     };
     // deep hum: two detuned oscillators
     const hg = ctx.createGain(); hg.gain.value = 0;
@@ -146,7 +176,12 @@ export class AudioEngine {
     p.refDistance = ref; p.rolloffFactor = 1.1; p.maxDistance = 400;
     if (p.positionX) { p.positionX.value = pos.x; p.positionY.value = pos.y; p.positionZ.value = pos.z; } else p.setPosition(pos.x, pos.y, pos.z);
     p.connect(bus);
-    if (this.caveSend > 0.05) { const s = this.ctx.createGain(); s.gain.value = this.caveSend * 0.6; p.connect(s).connect(this.reverb); }
+    // the effects bus has its own reverb sends; ambience gets them per sound
+    if (bus !== this.sfx) {
+      if (this.caveSend > 0.05) { const s = this.ctx.createGain(); s.gain.value = this.caveSend * 0.6; p.connect(s).connect(this.reverb); }
+      if (this.bigSend > 0.05) { const s = this.ctx.createGain(); s.gain.value = this.bigSend * 0.55; p.connect(s).connect(this.reverbBig); }
+    }
+    if (this.echoAmt > 0.05) p.connect(this.echoIn);
     return p;
   }
 
@@ -193,11 +228,12 @@ export class AudioEngine {
   creatureCall(sp, pos, kind = 'idle', scale = 1) {
     if (!this.ready) return;
     const c = sp.call, t = this.ctx.currentTime + 0.02;
-    const out = this.out(pos, this.sfx, 3 + sp.morph.size * 4);
+    const size = sp.size ?? 1;
+    const out = this.out(pos, this.sfx, 3 + size * 4);
     const p = c.pitch * (kind === 'alarm' ? 1.25 : kind === 'threat' || kind === 'hunt' ? 0.8 : 1) / Math.sqrt(Math.max(0.5, scale));
     const n = kind === 'alarm' ? Math.min(6, c.rhythm + 2) : c.rhythm;
     const L = c.length * (kind === 'threat' ? 1.4 : 1);
-    const vol = clamp(0.1 + sp.morph.size * 0.08, 0.08, 0.45);
+    const vol = clamp(0.1 + size * 0.08, 0.08, 0.45);
     const gap = Math.max(0.08, L * 0.7);
     switch (c.type) {
       case 'growl':
@@ -250,6 +286,17 @@ export class AudioEngine {
       case 'rumble':
         this.tone(out, t, { freq: 46, a: 0.2, s: L * 1.5, d: 0.6, gain: vol * 1.1 });
         this.noise(out, t, { buf: this.brown, type: 'lowpass', freq: 140, a: 0.2, s: L * 1.5, d: 0.6, gain: vol });
+        break;
+      case 'squeak':
+        // tiny, high and quick (bats and shrews)
+        for (let i = 0; i < n; i++) this.tone(out, t + i * 0.07, { freq: Math.min(6000, p * 2.2), a: 0.003, d: 0.035, gain: vol * 0.35, glide: Math.min(7000, p * 2.8), glideT: 0.03 });
+        break;
+      case 'chitter':
+        for (let i = 0; i < n * 2 + 2; i++) this.tone(out, t + i * 0.045 + Math.random() * 0.01, { freq: p * (1.4 + Math.random() * 0.3), type: 'square', a: 0.002, d: 0.025, gain: vol * 0.25, lp: 4000 });
+        break;
+      case 'scream':
+        this.tone(out, t, { freq: p * 1.1, type: 'sawtooth', a: 0.02, s: L * 0.6, d: 0.25, gain: vol * 0.4, lp: 3200, vib: 0.06, vibRate: 11, glide: p * 0.8 });
+        this.noise(out, t, { freq: p * 2, Q: 2, a: 0.02, s: L * 0.5, d: 0.2, gain: vol * 0.25 });
         break;
       case 'chime':
         for (let i = 0; i < n; i++) for (const [m, gg] of [[1, 1], [2.76, 0.5], [5.4, 0.25]]) this.tone(out, t + i * 0.28, { freq: p * m, a: 0.003, d: 1.4, gain: vol * 0.3 * gg });
@@ -322,6 +369,7 @@ export class AudioEngine {
       case 'ability': this.tone(o, t, { freq: 300, a: 0.05, d: 0.8, gain: 0.15, glide: 1200 }); this.noise(o, t, { type: 'highpass', freq: 2000, a: 0.05, d: 0.6, gain: 0.08 }); break;
       case 'lamp': this.tone(this.uiBus, t, { freq: 1400, type: 'square', d: 0.03, gain: 0.03, lp: 3000 }); break;
       case 'click': this.tone(this.uiBus, t, { freq: 900, type: 'triangle', d: 0.05, gain: 0.05 }); break;
+      case 'tick': this.tone(this.uiBus, t, { freq: 1500, type: 'triangle', d: 0.025, gain: 0.025 }); break;
       case 'open': this.noise(this.uiBus, t, { freq: 1800, Q: 0.5, a: 0.02, d: 0.25, gain: 0.05, sweep: 600 }); break;
       default: break;
     }
@@ -349,7 +397,9 @@ export class AudioEngine {
     const layer = e.layer;
     const open = 1 - e.enclosed;
     // wind: strongest on the surface and when hanging over the void
-    let wind = [0.5, 0.4, 0.16, 0.22][Math.min(3, layer)] * open + clamp(e.altitude / 60, 0, 1) * 0.35 * open;
+    const chasm = e.chasm || 0;
+    // the Great Fault breathes: an updraft howls along its walls
+    let wind = LAYER_WIND[Math.min(LAYER_WIND.length - 1, layer)] * open + clamp(e.altitude / 60, 0, 1) * 0.35 * open + chasm * 0.3;
     wind *= 0.75 + 0.25 * Math.sin(t * 0.13) * Math.sin(t * 0.071 + 1);
     const gust = Math.max(0, Math.sin(t * 0.23) * Math.sin(t * 0.37 + 2) - 0.3) * wind * 0.8;
     B.wind.g.gain.setTargetAtTime(wind * 0.5, t, 0.5);
@@ -359,10 +409,20 @@ export class AudioEngine {
     B.river.g.gain.setTargetAtTime(e.river * 0.16, t, 0.4);
     B.fall.g.gain.setTargetAtTime(e.fall * 0.5, t, 0.6);
     B.fall.f.frequency.setTargetAtTime(400 + e.fall * 500, t, 0.6);
-    B.cave.g.gain.setTargetAtTime(e.enclosed * 0.16 + (layer >= 3 ? 0.12 : 0), t, 0.8);
-    B.hum.g.gain.setTargetAtTime((layer >= 2 ? 0.04 : 0) + (layer >= 3 ? 0.06 : 0) + e.enclosed * 0.02, t, 1.0);
-    this.caveSend = e.enclosed;
-    this.sfxSend.gain.setTargetAtTime(0.08 + e.enclosed * 0.5 + (layer >= 2 ? 0.15 : 0), t, 0.5);
+    B.howl.g.gain.setTargetAtTime(chasm * 0.05 * (0.6 + 0.4 * Math.sin(t * 0.09)), t, 1.2);
+    B.howl.f.frequency.setTargetAtTime(170 + 60 * Math.sin(t * 0.05) + wind * 80, t, 1.5);
+    B.cave.g.gain.setTargetAtTime(e.enclosed * 0.16 + (layer === 3 ? 0.12 : layer >= 4 ? 0.05 : 0), t, 0.8);
+    B.hum.g.gain.setTargetAtTime((layer >= 2 ? 0.04 : 0) + (layer === 3 ? 0.06 : 0) + e.enclosed * 0.02, t, 1.0);
+    B.shimmer.g.gain.setTargetAtTime(layer >= 4 ? 0.018 * (1 - e.enclosed * 0.5) : 0, t, 2);
+    // reverb character: tight in caves, vast in the chasm and the lower layers' open halls
+    const big = clamp(Math.max(chasm, layer >= 2 ? open * 0.55 : 0), 0, 1);
+    this.caveSend = e.enclosed * (1 - chasm * 0.6);
+    this.bigSend = big;
+    this.echoAmt = chasm;
+    this.sfxSend.gain.setTargetAtTime(0.08 + e.enclosed * 0.5 * (1 - chasm * 0.6) + (layer >= 2 ? 0.1 : 0), t, 0.5);
+    this.sfxSendBig.gain.setTargetAtTime(big * 0.22, t, 0.6);
+    this.musicSendBig.gain.setTargetAtTime(big * 0.4, t, 1.5);
+    this.echoIn.gain.setTargetAtTime(chasm * 0.3, t, 0.6);
     // grapple winch
     this.motor.g.gain.setTargetAtTime(e.reeling ? 0.05 : e.paying ? 0.025 : 0, t, 0.05);
     this.motor.o.frequency.setTargetAtTime(e.reeling ? 95 : 60, t, 0.1);
@@ -388,11 +448,29 @@ export class AudioEngine {
         this.tone(o, t, { freq: f, a: 0.002, d: 0.12, gain: 0.07, glide: f * 1.6, glideT: 0.04 });
       }
     }
-    if (layer >= 3 && Math.random() < 0.3) {
+    if (layer === 3 && Math.random() < 0.22) {
       // the fault groans
       const o = this.out(around(60, -20), this.amb, 20);
       this.tone(o, t, { freq: 38 + Math.random() * 10, a: 1.5, s: 1, d: 3, gain: 0.25 });
       this.noise(o, t, { buf: this.brown, type: 'lowpass', freq: 120, a: 1.5, s: 1, d: 3, gain: 0.2 });
+    }
+    if (layer === 3 && (e.chasm || 0) > 0.3 && Math.random() < 0.3) {
+      // scree slipping somewhere on the far wall: a rush of gravel and a few knocks
+      const o = this.out(around(90 + Math.random() * 90, (Math.random() - 0.5) * 120), this.amb, 40);
+      this.noise(o, t, { buf: this.pink, type: 'bandpass', freq: 900 + Math.random() * 700, Q: 0.7, a: 0.2, s: 0.6 + Math.random(), d: 1.2, gain: 0.12 });
+      for (let i = 0, n = 3 + Math.floor(Math.random() * 6); i < n; i++) this.noise(o, t + 0.2 + Math.random() * 1.6, { freq: 600 + Math.random() * 900, Q: 3, a: 0.002, d: 0.08, gain: 0.18 });
+    }
+    if (layer === 3 && e.enclosed > 0.6 && Math.random() < 0.35) {
+      // embers ticking in the warm rock of the wall caves
+      const o = this.out(around(3 + Math.random() * 8), this.amb, 2);
+      for (let i = 0, n = 2 + Math.floor(Math.random() * 4); i < n; i++) this.noise(o, t + Math.random() * 0.8, { type: 'highpass', freq: 3500, a: 0.001, d: 0.02, gain: 0.05 });
+    }
+    if (layer >= 4 && Math.random() < 0.5) {
+      // glassy chimes of the Lantern Sea and the slow lap of dark water
+      const o = this.out(around(20 + Math.random() * 60, Math.random() * 20), this.amb, 12);
+      const f = [987.77, 1174.66, 1318.51, 1567.98, 1975.53][Math.floor(Math.random() * 5)];
+      for (const [m, g] of [[1, 0.035], [2.01, 0.012], [3.03, 0.006]]) this.tone(o, t, { freq: f * m, a: 0.004, d: 2.6, gain: g });
+      if (Math.random() < 0.5) this.noise(this.out(around(8 + Math.random() * 20, -2), this.amb, 6), t, { buf: this.brown, type: 'lowpass', freq: 380, a: 0.5, s: 0.3, d: 1.1, gain: 0.08 });
     }
     if (e.enclosed < 0.5 && layer <= 1) {
       if (!e.night && Math.random() < 0.55) {
@@ -423,7 +501,7 @@ export class AudioEngine {
   // ------------------------------------------------------------------ music
   updateMusic(e) {
     const t = this.ctx.currentTime;
-    const layer = Math.min(3, e.layer);
+    const layer = Math.min(LAYER_MUSIC.length - 1, e.layer);
     if (layer !== this.musicLayer) {
       this.musicLayer = layer;
       this.nextChord = t + 2;
@@ -471,7 +549,7 @@ export class AudioEngine {
     const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = M.bright * 0.6; f.Q.value = 0.5;
     f.frequency.linearRampToValueAtTime(M.bright, t + len * 0.5);
     f.frequency.linearRampToValueAtTime(M.bright * 0.5, t + len + 4);
-    const types = { warm: ['triangle', 'sine'], airy: ['sine', 'triangle'], glass: ['sine', 'sine'], dark: ['sawtooth', 'sine'] }[M.pad];
+    const types = { warm: ['triangle', 'sine'], airy: ['sine', 'triangle'], glass: ['sine', 'sine'], dark: ['sawtooth', 'sine'], choir: ['triangle', 'triangle'] }[M.pad];
     for (const [k, det] of [[0, -4], [1, 5]]) {
       const o = ctx.createOscillator(); o.type = types[k]; o.frequency.value = freq; o.detune.value = det;
       o.connect(f); o.start(t); o.stop(t + len + 6);
@@ -485,7 +563,9 @@ export class AudioEngine {
   }
 
   leadNote(t, freq, M) {
-    if (M.lead === 'bell') {
+    if (M.lead === 'chime') {
+      for (const [m, g] of [[1, 0.045], [2.01, 0.02], [4.1, 0.008]]) this.tone(this.music, t, { freq: freq * 2 * m, a: 0.002, d: 4.5, gain: g });
+    } else if (M.lead === 'bell') {
       for (const [m, g] of [[1, 0.06], [2.76, 0.025], [5.4, 0.012]]) this.tone(this.music, t, { freq: freq * m, a: 0.003, d: 3.2, gain: g });
     } else {
       this.tone(this.music, t, { freq, type: 'triangle', a: 0.004, d: 1.6, gain: 0.07, lp: 2200 });

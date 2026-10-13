@@ -21,6 +21,9 @@ export class GameRenderer {
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = settings.shadows !== false;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // the shadow map is redrawn only when it can be seen (see update)
+    this.renderer.shadowMap.autoUpdate = false;
+    this.shadowFrame = 0;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(settings.fov || 75, 1, 0.08, 9000);
     this.scene.add(this.camera);
@@ -30,7 +33,8 @@ export class GameRenderer {
     this.sun.castShadow = settings.shadows !== false;
     const sc = this.sun.shadow.camera;
     sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70; sc.near = 1; sc.far = 600;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    const ss = settings.shadowSize || 2048;
+    this.sun.shadow.mapSize.set(ss, ss);
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.04;
     this.scene.add(this.sun);
@@ -44,6 +48,7 @@ export class GameRenderer {
     this.time = 0;
     this.buildFalls();
     this.buildShafts();
+    this.buildChasmShafts();
     this.buildWindmills();
     this.particles = new Particles(this.scene, plan, settings.particles ?? 1);
     this.night = 0;
@@ -138,6 +143,29 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     this.scene.add(this.shafts);
   }
 
+  /** Pale shafts of daylight falling through the plain hole into the Great Fault. */
+  buildChasmShafts() {
+    this.chasmShafts = new THREE.Group();
+    const p = this.plan.params;
+    if (!p.chasm) return;
+    const mat = this.shaftMat.clone();
+    mat.uniforms = { uTime: shared.uTime, uI: { value: 0.5 }, uCol: { value: new THREE.Color(1, 0.88, 0.7) } };
+    this.chasmShaftMat = mat;
+    const n = 6;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + p.seed % 7, r = p.fault.r * (0.15 + 0.5 * ((i * 37) % 10) / 10);
+      const w = p.fault.r * (0.5 + 0.35 * ((i * 53) % 10) / 10);
+      const top = p.plainY + 40, bottom = p.plainY - 420 - i * 60;
+      const g = new THREE.PlaneGeometry(w, top - bottom, 1, 1);
+      const m = new THREE.Mesh(g, mat);
+      m.position.set(p.fault.x + Math.cos(a) * r, (top + bottom) / 2, p.fault.z + Math.sin(a) * r);
+      m.userData.tilt = (((i * 29) % 10) / 10 - 0.5) * 0.12;
+      m.renderOrder = 5;
+      this.chasmShafts.add(m);
+    }
+    this.scene.add(this.chasmShafts);
+  }
+
   buildWindmills() {
     this.windmills = new THREE.Group();
     const bladeMat = new THREE.MeshLambertMaterial({ color: 0xe8e0d0, side: THREE.DoubleSide });
@@ -171,7 +199,7 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
    */
   computeTarget(ctx) {
     const t = this.target;
-    const L = LAYERS[clamp(ctx.layer, 0, 3)];
+    const L = LAYERS[clamp(ctx.layer, 0, 4)];
     const v = L.visuals;
     // day/night factor
     const tod = ctx.timeOfDay;
@@ -192,14 +220,26 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     t.sunColor.setRGB(...v.sun);
     if (dusk > 0.05) t.sunColor.lerp(tmpC.setRGB(1, 0.6, 0.35), dusk * 0.6);
     t.sunI = 3.1 * day * lerp(1, 0.55, depthK) + 0.35 * night;
-    const glowBase = ctx.layer >= 3 ? [0.16, 0.05, 0.03] : ctx.layer === 2 ? [0.05, 0.14, 0.12] : [0.04, 0.07, 0.07];
-    t.glow.setRGB(...glowBase);
+    if (ctx.layer >= 3) {
+      // the Great Fault changes with depth: ember reach, rust strata, lantern deeps, the basin
+      const u = smoothstep(-1150, -1350, ctx.y), d = smoothstep(-1550, -1750, ctx.y);
+      const ember = [0.18, 0.075, 0.045], rust = [0.16, 0.115, 0.07], deep = [0.05, 0.13, 0.135];
+      const g = [0, 1, 2].map((i) => lerp(lerp(ember[i], rust[i], u), deep[i], d));
+      t.glow.setRGB(g[0], g[1], g[2]);
+      const fe = [0.13, 0.09, 0.085], fr = [0.14, 0.11, 0.085], fd = [0.055, 0.1, 0.11];
+      t.fog.setRGB(...[0, 1, 2].map((i) => lerp(lerp(fe[i], fr[i], u), fd[i], d)));
+      if (ctx.layer >= 4) { t.glow.setRGB(0.05, 0.13, 0.17); t.fog.setRGB(...v.fogColor); }
+      t.fogDensity = v.fogDensity * (1 + ctx.enclosed * 0.6);
+    } else {
+      const glowBase = ctx.layer === 2 ? [0.05, 0.14, 0.12] : [0.04, 0.07, 0.07];
+      t.glow.setRGB(...glowBase);
+    }
     // sky palette
     t.zenith.setRGB(0.22, 0.42, 0.78).lerp(tmpC.setRGB(0.02, 0.03, 0.08), night);
     t.horizon.setRGB(0.7, 0.8, 0.9).lerp(tmpC.setRGB(0.95, 0.6, 0.45), dusk).lerp(tmpC.setRGB(0.05, 0.07, 0.12), night);
     t.sun.setRGB(1, 0.9, 0.7).lerp(tmpC.setRGB(1, 0.5, 0.3), dusk);
     t.skyDim = lerp(1, 0.75, depthK);
-    t.exposure = lerp(1.05, 1.35, depthK) + night * 0.25;
+    t.exposure = lerp(1.05, 1.35, depthK) + night * 0.25 * (1 - depthK) + (ctx.layer >= 3 ? 0.2 : 0);
     return { sunElev, day, night };
   }
 
@@ -240,6 +280,22 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     this.sun.position.copy(playerPos).addScaledVector(dir, 250);
     this.sun.target.position.copy(playerPos);
     this.sun.shadow.camera.updateProjectionMatrix();
+    // below the plain the sun no longer reaches the rock: stop redrawing the
+    // shadow map there (the deep layers are lit by glow, lamps and embers)
+    if (this.renderer.shadowMap.enabled) {
+      this.shadowFrame++;
+      const lit = ctx.y > -960 && e.sunI > 0.25;
+      const every = (this.settings.shadowSize || 2048) <= 1024 ? 2 : 1;
+      this.renderer.shadowMap.needsUpdate = lit && this.shadowFrame % every === 0;
+      if (!lit && this.shadowLit !== false) {
+        // one last pass with the shadow camera parked high above the world,
+        // so the map that stays behind shades nothing
+        this.sun.position.set(playerPos.x, 9000, playerPos.z);
+        this.sun.target.position.set(playerPos.x, 8990, playerPos.z);
+        this.renderer.shadowMap.needsUpdate = true;
+      }
+      this.shadowLit = lit;
+    }
     this.sky.update(this.camera.position, e);
     // light shafts face the camera around the vertical axis
     const shaftI = st.day * (1 - smoothstep(0.6, 1.0, ctx.enclosed));
@@ -249,6 +305,16 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
       m.rotation.z = m.userData.tilt;
     }
     this.shafts.visible = shaftI > 0.02;
+    if (this.chasmShaftMat) {
+      // seen from the plain and from inside the fault
+      const ci = st.day * (ctx.layer === 2 ? 0.5 : ctx.layer === 3 ? 0.22 : 0) * (1 - smoothstep(0.6, 1.0, ctx.enclosed));
+      this.chasmShaftMat.uniforms.uI.value = ci;
+      for (const m of this.chasmShafts.children) {
+        m.rotation.y = Math.atan2(this.camera.position.x - m.position.x, this.camera.position.z - m.position.z);
+        m.rotation.z = m.userData.tilt;
+      }
+      this.chasmShafts.visible = ci > 0.02;
+    }
     for (const w of this.windmills.children) w.userData.rotor.rotation.z += dt * w.userData.speed;
     this.night = st.night;
     const pxScale = this.renderer.domElement.height / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
@@ -263,6 +329,13 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     this.renderer.shadowMap.enabled = on;
     this.sun.castShadow = on;
     this.scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) m.needsUpdate = true; } });
+  }
+
+  setShadowSize(n) {
+    this.settings.shadowSize = n;
+    this.sun.shadow.mapSize.set(n, n);
+    if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
+    this.renderer.shadowMap.needsUpdate = true;
   }
 
   setPixelRatio(r) {

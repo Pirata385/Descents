@@ -1,0 +1,129 @@
+DESCENTS — version 0.3.0
+Date: 2026-10-13
+Layer 3, the Great Fault, explorable from top to bottom; the entrance of
+Layer 4; a rebuilt creature system; PS4 controller support; deep-layer
+lighting and sound; graphics presets and performance work.
+
+LAYER 3 — THE GREAT FAULT (900–1900 m)
+- The fault is now a chasm about 300 m across and a kilometre deep, from the
+  Stone Plain to the entrance of Layer 4. Its shape is procedural: it drifts,
+  narrows and widens, its walls are warped and banded, and its depth zones
+  (ember reach, rust strata, lantern deeps) have their own rock, light, fog,
+  particles and ambience.
+- The staircase descent (the Threshold Descent) is gone. The way down is a
+  natural cave network in the chasm walls: swallets in the plain open into
+  passages that traverse, meander, switch back and corkscrew down from hall
+  to hall. Two trunks cross, merge and loop; side passages, dead-end dens and
+  cross links make it a network rather than a corridor.
+- Halls are named chambers (vaults, galleries, grottos); windows break out
+  of the walls onto ledges over the void; natural shelves, nest ledges and
+  roosts line the walls.
+- At the bottom: the Basin, a cavern floor of dark pools and pale fungus, and
+  the Fourth Gate, the entrance of Layer 4, the Lantern Sea (1900 m).
+- The planner checks every passage for walkability (step height, headroom,
+  floor, grade), checks that the network connects the plain to the Basin and
+  the Gate, and removes passages that cannot be made walkable.
+- Maps: the Great Fault has three map bands (upper, middle, lower) plus a
+  Layer 4 band, the chasm outline is drawn, and new landmark types (swallets,
+  halls, windows, rookeries, the Basin, the Fourth Gate) are discovered and
+  charted. The vertical map reaches 2000 m.
+- New artifact sites: dens, windows, nest ledges and the Fourth Gate.
+
+CREATURES — REBUILT FROM SCRATCH
+- Genome: 49 continuous genes with a species mean and spread, plus allele
+  traits (ear shape, horns, crest, tail tip, pattern, eyes, spike rows,
+  cheeks). No two individuals of a species look the same.
+- Twelve body plans (quadruped, biped, sprawler, serpent, bird, bat, glider,
+  insect, spider, centipede, golem, roller) turn genes into proportions,
+  features, natural palettes per layer and abilities.
+- Subspecies: every species has two or three regional forms with their own
+  gene offsets and allele preferences, chosen by depth, zone and sector; no
+  variant is defined by hand. Hybrids occur where ranges meet.
+- Inheritance: each gene from either parent or a blend, plus mutation;
+  regions keep pools of genomes, so the creatures you meet descend from the
+  ones you met before.
+- One skinned, flat-shaded mesh per individual (one draw call) with painted
+  patterns and glowing markings in the deep.
+- Procedural animation: gaits per body plan with two-bone IK foot placement,
+  wing flaps, folds and glides, head tracking, breathing, feeding, calls,
+  threat displays and courtship.
+- Behaviour: needs (hunger, energy, fear, mating, the group) and a
+  temperament from the genes drive a utility AI — forage, hunt, flee,
+  scavenge, court, nest, raise young, flock, mob predators, defend
+  territory, live beside hosts, investigate the explorer, sleep.
+- Habitats: ground, cave passages, chasm walls, open air, perches and
+  roosts. Food webs are built per layer, with mobbing and symbiosis.
+- Layer 3 has only the requested fauna: small lizards and mammals in the
+  caves (skinks, lichen geckos, cave shrews, tunnel ferrets) and birds,
+  lizards and flying mammals in the chasm (wall-nesting swifts, falcons,
+  wall-climbing and gliding lizards, rift bats, flying foxes) that nest and
+  roost on its walls.
+- Creatures of the surface and Layers 1 and 2 never attack the explorer, and
+  a quiet observer is gradually tolerated. In the Great Fault, nesting
+  falcons and wall lizards defend their eggs and dive at an explorer who
+  comes too close.
+- The journal shows each species' niche, regional forms, traits and how it
+  raises its young; the bestiary view (?bestiary=1) shows two parents and
+  four of their young per species.
+
+PS4 CONTROLLER
+- DualShock 4 support (DualSense and other standard-layout controllers
+  work the same): analog movement and look with a response curve and turn
+  acceleration, L3 run toggle, face buttons for jump, crouch, take and
+  observe, triggers and bumpers for the grappling arm, d-pad for the lamp,
+  the artifact ability and the maps, SHARE / touchpad for the journal,
+  OPTIONS to pause.
+- Menus, settings and the journal are fully navigable: a focus highlight,
+  ✕ select, ○ back, L1/R1 journal tabs, right stick scrolling, map pan and
+  zoom.
+- PlayStation glyphs in prompts and hints while the controller is in use;
+  switching back to the keyboard, mouse or touch screen switches back.
+- Rumble on hurt, hard landings, death, and when the claw fires and bites.
+- Settings: stick look speed, dead zone, vibration. On phones and tablets
+  the touch buttons hide while a controller is in use.
+
+RENDERING, LIGHTING AND SOUND
+- Deep lighting: below the plain the sun no longer reaches; the fault is lit
+  by ember veins, lichen, glowing fungus, light shafts from the plain, the
+  creatures' glow and the lamp. Layer 4 has its own cold palette and motes.
+- Graphics presets Low / Medium / High / Ultra (Custom when edited) set view
+  distance, resolution, shadows and shadow size, particles and creature
+  count. Phones start on Low.
+- Dynamic resolution: automatic quality lowers the render scale first, then
+  the view distance, and restores them when there is headroom.
+- Audio: Layer 4 music; a tight cave reverb, a vast chasm reverb and an
+  echo off the far wall, mixed by how open the chasm is around you; the
+  updraft howling through the fault, scree falls, ticking embers, the chimes
+  and lapping water of the Lantern Sea; new creature calls (squeak, chitter,
+  scream).
+
+PERFORMANCE AND MEMORY
+- The shadow map is redrawn only where the sun reaches (and every other
+  frame at 1024 px).
+- Distant creatures think, move and animate at a lower rate; strays turn
+  back instead of being recycled; new regions are surveyed and new bodies
+  built within a per-frame time budget.
+- Fault generation: cached chasm wall queries, a cached warp grid and a
+  spatial index for clearance checks; the runtime wall cache is capped.
+
+FIXES
+- The explorer no longer dies below 1150 m (the old bottom of the world).
+- A tap on a phone is no longer swallowed by the input device switch.
+
+SAVES
+- Save format version 2. Saves made by 0.2.0 or earlier start their seed
+  anew, because the world below the Stone Plain and its creatures changed.
+
+TESTS
+- npm test: a Layer 3 suite (chasm, connected cave network, walkable
+  passages, windows, dens, nests) and a rewritten creature suite (Layer 3
+  fauna, anatomy differs between individuals, species differ, inheritance
+  and subspecies, food webs, animation, Layer 1 / cave / chasm simulations,
+  nest defence, breeding).
+- tools/traverse-test.mjs also walks the fault cave network, passage by
+  passage, from the swallet in the plain to the Fourth Gate with the real
+  player physics.
+- tools/gamepad-test.mjs (npm run test:gamepad): a scripted DualShock 4
+  drives the menus, settings, play, the journal and pause.
+- tools/scenario-test.mjs visits the swallet, a hall, a window, the Basin
+  and the Fourth Gate.

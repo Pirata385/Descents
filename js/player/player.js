@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { resolveHorizontal, groundUnder, ceilingOver, spaceFree, resolveColliders } from './collision.js';
 import { clamp, lerp } from '../core/mathutil.js';
 import { MATERIALS, M } from '../world/materials.js';
+import { BOTTOM_Y } from '../world/params.js';
 
 const G = 22;
 const JUMP_V = 7.6;
@@ -74,9 +75,12 @@ export class Player {
 
   look(dt) {
     const inp = this.input;
-    const s = this.lookSens * (this.game.settings.sensitivity || 1) * (this.zoomed ? 0.35 : 1);
-    this.yaw -= inp.mouseDX * s;
-    this.pitch -= inp.mouseDY * s * (this.game.settings.invertY ? -1 : 1);
+    const zoom = this.zoomed ? 0.35 : 1;
+    const s = this.lookSens * (this.game.settings.sensitivity || 1) * zoom;
+    // gamepad look arrives in radians; it slows less when zoomed so aiming stays brisk
+    const pz = this.zoomed ? 0.45 : 1;
+    this.yaw -= inp.mouseDX * s + inp.padLookX * pz;
+    this.pitch -= (inp.mouseDY * s + inp.padLookY * pz) * (this.game.settings.invertY ? -1 : 1);
     this.pitch = clamp(this.pitch, -1.55, 1.55);
     void dt;
   }
@@ -400,7 +404,7 @@ export class Player {
     }
     this.deepest = Math.max(this.deepest, -this.pos.y);
     // fell out of the world
-    if (this.pos.y < -1150) this.die('void');
+    if (this.pos.y < BOTTOM_Y - 20) this.die('void');
   }
 
   updateCamera(dt) {

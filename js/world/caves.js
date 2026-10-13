@@ -240,18 +240,24 @@ export function helixTunnel(field, { id, thetaStart, dir, rOffset, yStart, yEnd,
   return { id, kind, name, nodes, links, chambers: [], walkable: true, thetaEnd: th, entrance: nodes[0], exit: nodes[nodes.length - 1], layer: yStart > -350 ? 1 : 2 };
 }
 
-/** Flatten caves into a capsule array: [ax, ay, az, bx, by, bz, ra, rb, caveId] */
+/**
+ * Flatten caves into a capsule array: [ax, ay, az, bx, by, bz, ra, rb, code]
+ * where code = caveId + materialClass * 65536 (see CAVE_MAT).
+ */
+export const CAVE_MAT = { DEFAULT: 0, FAULT: 1, DEN: 2, DEEP: 3 };
 export function cavesToCapsules(caves) {
   const caps = [];
   for (const c of caves) {
+    const code = c.id + (c.mat || 0) * 65536;
     for (const [i, j] of c.links) {
       const a = c.nodes[i], b = c.nodes[j];
-      caps.push(a.x, a.y, a.z, b.x, b.y, b.z, a.r, b.r, c.id);
+      caps.push(a.x, a.y, a.z, b.x, b.y, b.z, a.r, b.r, code);
     }
     for (const i of c.chambers) {
       const a = c.nodes[i];
-      caps.push(a.x, a.y, a.z, a.x, a.y, a.z, a.r, a.r, c.id);
+      caps.push(a.x, a.y, a.z, a.x, a.y, a.z, a.r, a.r, code);
     }
+    for (const b of c.blobs || []) caps.push(b.x, b.y, b.z, b.x, b.y, b.z, b.r, b.r, code);
   }
   return Float32Array.from(caps);
 }

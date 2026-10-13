@@ -37,9 +37,10 @@ automatically on phones and tablets (or via *Settings → Touch → Touch
 controls*). Starting a game goes full screen and locks landscape where the
 browser allows it; turning the device upright pauses the game and asks you to
 rotate back. Adding the page to the home screen launches it full screen in
-landscape. The first launch on a mobile device picks lighter graphics
-settings (shorter view distance, no shadows, fewer particles), and view
-distance adapts automatically if the frame rate drops.
+landscape. The first launch on a mobile device picks the **Low** graphics
+preset, and the resolution (then the view distance) adapts automatically if
+the frame rate drops. A PS4 controller paired with the phone or tablet works
+too — the touch buttons hide while you use it.
 
 | Touch | Action |
 | --- | --- |
@@ -78,6 +79,38 @@ Button size, opacity and look speed are adjustable under *Settings → Touch*.
 | `I` | Equipment |
 | `Esc` / `P` | Pause (save, load, settings, controls) |
 
+### Controller (PS4 DualShock 4)
+
+Connect a PS4 controller by USB or Bluetooth and press any button; the game
+says when it is recognised. A PS5 DualSense or any controller the browser
+reports with the standard layout works the same way. Prompts switch to
+PlayStation button glyphs while you use it, and switch back as soon as you
+touch the keyboard, mouse or screen.
+
+| Button | Action |
+| --- | --- |
+| Left stick | Move (analog) · push up or down to climb |
+| `L3` | Run (toggle; stopping ends it) |
+| Right stick | Look (a response curve for fine aim; turning speeds up when held fully over) |
+| `✕` | Jump · hold against rock to climb · let go of the cable |
+| `○` | Crouch · drop from a wall |
+| `□` | Take an artifact |
+| `△` / `R3` (hold) | Observe — zoom in and study a creature |
+| `R2` | Fire / release the grappling arm |
+| `L2` / `L1` | Reel in / pay out the cable |
+| `R1` | Release the cable |
+| D-pad ↑ / ↓ | Explorer's lamp / active artifact ability |
+| D-pad ← / → | Map / vertical abyss map |
+| `SHARE` / touchpad | Creature catalog / equipment |
+| `OPTIONS` | Pause |
+
+Menus and the journal are fully playable with the controller: the d-pad or
+left stick moves a highlight between buttons (and changes sliders and
+lists), `✕` selects, `○` goes back, `L1`/`R1` switch journal tabs and the
+right stick scrolls — on the map it pans, with `L2`/`R2` to zoom. The
+controller rumbles when you are hurt, land hard and when the claw bites.
+Stick look speed, dead zone and vibration are under *Settings → Controller*.
+
 ---
 
 ## The world
@@ -112,10 +145,27 @@ vertical routes. Near the bottom of the layer the shaft widens into a bell
 chamber over the **Stone Plain**, a pale rock plain with scattered trees,
 pools, ruins, rock formations and its own creatures.
 
-### Layer 3 — The Great Fault (from 900 m)
-The plain is split by the Great Fault. A ledge path leads down to **the
-Threshold**, the entrance of the third layer. This version ends there; it is
-also where the creatures stop ignoring you.
+### Layer 3 — The Great Fault (900–1900 m)
+The plain is split by the Great Fault, a chasm about 300 m across that drops
+a full kilometre. There is no staircase into it: the way down is a **natural
+cave network** in its walls. Swallets (sinkholes) in the floor of the plain
+open into passages that wind, switch back and corkscrew down through the
+rock from hall to hall — vaults, galleries and grottos with their own names —
+along two main trunks that cross, merge and loop, with dead-end dens and side
+passages. **Windows** break out onto the void: ledges with a view across the
+chasm, its nesting cliffs and the faint glow far below. The rock changes with
+depth (ember-veined in the upper reach, rust strata in the middle, cold
+lichen-lit deeps near the bottom), and so do the light, fog and sound.
+
+At the bottom the lowest passage opens into **the Basin**, a cavern floor of
+dark pools and pale fungus, and from there **the Fourth Gate** leads to the
+entrance of **Layer 4, the Lantern Sea** (1900 m), where this version ends.
+
+Only two kinds of animal live in the fault: small lizards and mammals in the
+caves (skinks, lichen geckos, cave shrews, tunnel ferrets), and the fliers
+and climbers of the open chasm (swifts and falcons that nest on the walls,
+rift bats and flying foxes that roost under overhangs, wall-climbing and
+gliding lizards).
 
 ### Guaranteed routes
 After generation, the planner traces and **validates** walkable routes —
@@ -123,9 +173,12 @@ step heights, headroom, floors — and the test suite checks they connect:
 gate stairways out of the city; several Layer 1 journeys (the long and safe
 Delvers' Road, a river trail, a cave route, a ridge trail); the Lip Approach;
 the Great Spiral ledge down the shaft into the galleries; deep tunnels and
-gallery trails; the Long Stair to the Stone Plain; the Plain Trail; and the
-Threshold Descent. Shortcuts exist for the bold: cliffs to climb, caves, and
-gaps that need the grappling arm.
+gallery trails; the Long Stair to the Stone Plain; the Plain Trail to the
+main swallet. Below that, the planner checks every passage of the fault cave
+network (step heights, headroom, floors, grades) and that the halls connect
+the plain to the Basin and the Fourth Gate; passages that cannot be made
+walkable are removed. Shortcuts exist for the bold: cliffs to climb, caves,
+windows, and gaps that need the grappling arm.
 
 ### Water
 Water is not made of blocks. Lakes are flat continuous surfaces at a
@@ -152,26 +205,51 @@ cliff, and get pulled over the ledge when you reach the claw. The cable snags
 on edges it passes over. Artifacts can extend its range and winch speed.
 
 ### Creatures and the genome system
-Each world has roughly 30 species across five families — **mammals,
-reptilians, birds, arthropods and lithoseres** (living rock and mineral
-creatures). Species are built from ecological roles (grazers, browsers,
-predators, scavengers, pollinators, decomposers, lithophages, cliff gliders,
-ceiling crawlers…) and a genome that sets size, proportions, number of legs,
-locomotion, head and eyes, mouth or beak, horns, crests, spines, tails,
-wings, covering, colours and patterns, diet, speed, strength, perception,
-social structure, reproduction, aggression and activity period. Individuals
-carry heritable variation and offspring inherit a blend of both parents plus
-mutation — so parents and young look related but never identical.
+Each world has 33–36 species across five families — **mammals, reptiles,
+birds, arthropods and lithoseres** (living rock and mineral creatures) —
+filling ecological niches per layer (grazers, browsers, predators,
+scavengers, pollinators, decomposers, lithophages, cliff gliders, ceiling
+crawlers, cave foragers, chasm raptors, roosting fliers…).
+
+Every species is a **gene pool**, not a template. 49 continuous genes
+(body length and depth, neck, head, snout, jaw, eyes, ears, leg length and
+thickness, feet, tail length and thickness, wing span and chord, crest,
+spikes, plates, shaggy cover, colours, pattern, glow, speed, agility,
+boldness, curiosity, sociality, aggression, territoriality…) each have a
+species mean and spread, and discrete traits — ear shape, horns, crest,
+tail tip, pattern, eyes, spike rows, cheeks — are drawn from allele tables.
+Twelve **body plans** (quadruped, biped, sprawler, serpent, bird, bat,
+glider, insect, spider, centipede, golem, roller) turn genes into anatomy,
+so two individuals of one species differ in proportions and ornaments, not
+just colour. **Subspecies** arise by themselves: each species has two or
+three regional forms with their own gene offsets and allele preferences,
+chosen by depth, zone and sector — a form of the plain may be crested where
+its cousins of the walls are not. Offspring take each gene from either
+parent or a blend, plus mutation; hybrids between neighbouring forms happen
+where their ranges meet.
+
+Each creature is one procedurally built, skinned mesh (one draw call) with
+painted patterns and, in the deep, glowing markings. Animation is
+procedural: gaits by body plan with foot placement (two-bone IK), wing
+flaps, folds and glides, head tracking, breathing, feeding, calling and
+threat displays.
 
 ### Ecosystem
 Populations are simulated per region whether or not you are watching:
-growth, predation, competition and migration continue in the background.
-Near you, regions materialise into individual creatures that forage, graze,
-drink, hunt, flee, defend territory, court, give birth, raise young that
-follow their parents, flock, live in symbiosis with hosts, scavenge kills,
-sleep by their activity cycle and migrate. In Layers 1 and 2 creatures ignore
-the explorer; in the Great Fault something will hunt you — your lamp keeps it
-at bay.
+growth, predation, competition and migration continue in the background,
+and every region keeps a pool of genomes so the individuals you meet are
+the descendants of those you met before. Near you, regions materialise into
+individuals with needs (hunger, energy, fear, the urge to mate, the pull of
+the group) and a temperament from their genes. Each decides what to do from
+moment to moment: forage, graze, hunt, flee, scavenge, court, nest, raise
+young that follow their parents, flock, mob a predator, defend a territory,
+live beside a host, investigate the explorer or sleep by its activity
+cycle. Creatures live where their bodies fit: on the ground, in the cave
+passages, on the chasm walls, in the air, perched, or hanging from roosts.
+Animals of the surface and Layers 1 and 2 never attack the explorer; a
+quiet, still observer is gradually tolerated. In the Great Fault, nesting
+falcons and wall lizards defend their eggs — come too close and they will
+dive at you until you back off.
 
 ### Observing and the catalogs
 Look at a creature to record it. Hold **F** to observe it closely: the longer
@@ -191,14 +269,16 @@ spring, feather-fall, grip, reach, winch, light, creature sense, dowsing,
 insight, vigour, wayfinding, swimming), active abilities (flare, updraft,
 echo pulse, glide, survey) and sometimes drawbacks. They rest where it makes
 sense — in ruins, deep cave chambers, atop spires, among crystal geodes, in the
-spray of waterfalls, beneath the Threshold. Wear up to three; their properties
+spray of waterfalls, in the dens and windows of the Great Fault, beside its
+nests and at the Fourth Gate. Wear up to three; their properties
 reveal themselves after carrying them a while. The **Artifact Catalog**
 records appearance, category, rarity, known properties and where each was
 found.
 
 ### Maps
 - **Map (M):** a chart of the terrain you have actually explored, per depth
-  band (surface & Layer 1, Layer 2, Layer 3), with hillshade and contours,
+  band (surface & Layer 1, Layer 2, the upper, middle and lower Great Fault,
+  Layer 4), with hillshade and contours, the outline of the chasm,
   water, discovered landmarks, routes you have walked, artifact sites, your
   trail and layer boundaries once you have reached them. Nothing is revealed
   automatically.
@@ -212,15 +292,23 @@ you reach a new layer, plus manual saves from the pause menu). A save stores
 the seed and everything that changed — your position and state, discoveries,
 catalog, artifacts, explored map, trail and ecosystem populations — so
 loading regenerates exactly the same world. Saves can be exported to and
-imported from JSON files.
+imported from JSON files. Version 0.3.0 rebuilt the world below the Stone
+Plain and the creatures, so a save made by an earlier version starts its
+seed anew (the game says so when you load it).
 
 ### Atmosphere
 Each layer has its own lighting, fog, sky, particles (pollen, fireflies,
-spores, cave dust, embers) and sound. Days and nights pass (one game hour per
-real minute). All audio is synthesised live: wind, rivers, lakes, waterfalls,
-cave drips and reverb, the city, footsteps per ground material, the arm's
-winch, every species' own call derived from its genome, and generative music
-whose scale and instruments change with each layer.
+spores, cave dust, embers, the motes of the Lantern Sea) and sound. Days and
+nights pass (one game hour per real minute). Below the plain the sun no
+longer reaches: the fault is lit by ember veins, glowing lichen and fungus,
+shafts of light from the plain far above, the creatures' own glow and your
+lamp. All audio is synthesised live: wind (and the updraft howling through
+the fault), rivers, lakes, waterfalls, cave drips, scree falls, ticking
+embers, the chimes of the Lantern Sea, the city, footsteps per ground
+material, the arm's winch, every species' own call derived from its genome,
+and generative music whose scale and instruments change with each layer.
+Reverb follows the space: tight in passages, vast in the chasm, with an
+echo off its far wall.
 
 ---
 
@@ -234,12 +322,14 @@ lib/three/            three.js (vendored)
 server.js             tiny static server (npm start)
 js/main.js            boots the app (or debug views via URL parameters)
 js/game.js            game loop, plan generation in workers, systems
-js/core/              rng (seeded), noise, hex grid, math, input, workers
+js/core/              rng (seeded), noise, hex grid, math, input, gamepad (PS4), workers
 js/world/             procedural generation
   params.js             seed → world parameters
   field.js              terrain field: rim, city plateau, bowl, Eye, galleries, plain, fault
   hydrology.js          coarse grid, lakes (priority flood), rivers, falls
-  caves.js abyss.js     caves, the spiral, gallery windows, deep tunnels, fault ledge
+  caves.js abyss.js     caves, the spiral, gallery windows, deep tunnels
+  chasm.js              the Great Fault: shape of the chasm, wall distance queries
+  faultcaves.js         the cave network in the fault walls, windows, dens, basin, gate, nest sites
   city.js ruins.js      city planning, ruins, arches, spires, crystals
   structures.js         building primitives
   routes.js             path finding, profiles, validation
@@ -250,7 +340,14 @@ js/world/             procedural generation
   layers.js             extensible layer definitions (visuals, audio, ecology, artifacts)
 js/render/            renderer, materials/shaders, sky, particles, chunk streaming (LOD)
 js/player/            explorer controller, collision, grappling arm
-js/creatures/         genetics, creature meshes, procedural animation, ecosystem
+js/creatures/         creature system
+  genome.js             genes, alleles, niches, species, subspecies, inheritance, food webs
+  anatomy.js            body plans: genes → proportions, features, colours, stats
+  bodyMesh.js           one skinned mesh per individual, shared material
+  motion.js             procedural animation (gaits, IK feet, wings, actions)
+  brain.js              needs, temperament and utility-based decisions
+  habitat.js            where creatures can live: ground, caves, walls, air, roosts
+  ecosystem.js          regional populations, spawning, actions, movement, events
 js/artifacts/         artifact generation, models, in-world artifact system
 js/systems/           discovery, map exploration data, environment probe, saves
 js/audio/             procedural audio engine
@@ -271,10 +368,16 @@ up from its definition.
 ### Performance
 The world is never instantiated whole. A quadtree of hexagonal chunks streams
 around the explorer with six levels of detail, meshed in parallel web workers;
-far chunks are simplified, foliage is limited to near chunks and creatures are
-materialised only within ~150 m (at most 120 at a time) with the rest of the
-ecosystem simulated abstractly. Settings let you trade view distance,
-resolution, shadows and particles for speed.
+far chunks are simplified and foliage is limited to near chunks. Creatures
+are materialised only within ~120 m (16–96 at a time, by setting) with the
+rest of the ecosystem simulated abstractly; distant individuals think,
+move and animate at a lower rate, new regions are surveyed and new bodies
+built within a small time budget per frame, and each body is a single draw
+call. The shadow map is only redrawn where the sun reaches. Graphics presets
+(Low, Medium, High, Ultra) set view distance, resolution, shadows, particles
+and creature count; with automatic quality on, the game first lowers the
+rendering resolution and then the view distance to hold the frame rate,
+and gives them back when it can.
 
 ---
 
@@ -287,14 +390,17 @@ npm test World                        # one suite
 ```
 
 `npm test` generates several worlds and checks: deterministic generation and
-seed variety; the city; Layer 1, the Eye, Layer 2 galleries and plain, the
-Layer 3 entrance; that every guaranteed route validates and is connected to
-the city; water rules (level lakes, contained shores, downhill rivers, no
-floating water); caves, overhangs and cliffs; species per layer and family,
-morphological variety, food webs and inheritance; a headless ecosystem
-simulation (behaviours happen without the player; Layer 1 creatures ignore
-the explorer; the Layer 3 predator hunts); artifact placement and effects;
-save round trips; and generation/meshing speed.
+seed variety; the city; Layer 1, the Eye, Layer 2 galleries and plain; the
+Great Fault (a kilometre-deep chasm, a connected cave network from the plain
+to the Basin and the Fourth Gate, walkable passages, windows, dens, nest
+sites); that every guaranteed route validates and is connected to the city;
+water rules (level lakes, contained shores, downhill rivers, no floating
+water); caves, overhangs and cliffs; artifact placement and effects; save
+round trips; and generation/meshing speed. The creature suite checks
+that Layer 3 holds only cave and chasm fauna, that individuals of a species
+differ in anatomy, that species differ in plan and behaviour, inheritance
+and subspecies, food webs, animation, headless simulations of Layer 1, the
+caves and the chasm, nest defence and breeding.
 
 Browser checks use Playwright and a running server
 (`node server.js 8099`):
@@ -302,15 +408,18 @@ Browser checks use Playwright and a running server
 ```bash
 npm run test:ui        # menus, HUD, journal tabs, pause, saving (screenshots in tests/output)
 npm run test:play      # observe a creature, take an artifact, visit every layer
-npm run test:traverse  # an autopilot walks every guaranteed route, city → Layer 3, with real physics
+npm run test:traverse  # an autopilot walks every guaranteed route and the fault caves, city → Layer 4, with real physics
 npm run test:grapple   # climb a rim cliff using only the grappling arm
 npm run test:mobile    # emulated phone: touch controls, landscape/portrait, journal, pause, layout
+npm run test:gamepad   # a scripted PS4 controller: menus, settings, play, journal, pause, rumble
 ```
 
 Set `BASE_URL` if the server runs elsewhere.
 
-Debug views: `index.html?debug=1&seed=…&loc=rim|station|bowl|shaft|gallery|plain|fault`
-(free camera) and `index.html?bestiary=1&seed=…` (every species, adult and young).
+Debug views: `index.html?debug=1&seed=…&loc=rim|station|bowl|shaft|gallery|plain|sinkhole|hall|fault|chasm|up|basin|gate`
+(free camera; `&i=` picks a hall, `&y=` a chasm depth) and
+`index.html?bestiary=1&seed=…&layer=layer3` (each species: two parents and four of
+their young, showing inherited variation).
 
 ---
 

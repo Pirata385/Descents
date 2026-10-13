@@ -7,7 +7,8 @@ import * as THREE from 'three';
 import { LAYERS } from '../world/layers.js';
 import { CF } from '../world/column.js';
 import { Z_CITY, Z_COUNTRY } from '../world/field.js';
-import { FAMILY_LABEL } from '../creatures/genetics.js';
+import { FAMILY_LABEL } from '../creatures/genome.js';
+import { BAND } from '../creatures/habitat.js';
 import { clamp } from '../core/mathutil.js';
 
 /** Observation seconds needed to learn each group of facts. */
@@ -16,9 +17,10 @@ const FULL_OBSERVATION = 24;
 
 const LANDMARK_RADIUS = {
   eye: 420, waterfall: 160, lake: 120, gate: 70, guild: 90, market: 60, temple: 90, observatory: 90, hamlet: 90, platform: 40,
-  ruin: 60, arch: 80, spire: 90, station: 70, gallery: 140, plain: 220, stair: 60, fault: 260, threshold: 60, cave: 26, crystal: 45,
+  ruin: 60, arch: 80, spire: 90, station: 70, gallery: 140, plain: 220, stair: 60, fault: 260, cave: 26, crystal: 45,
+  sinkhole: 30, hall: 24, window: 22, rookery: 40, basin: 160, fourthgate: 30,
 };
-const LANDMARK_DY = { eye: 900, waterfall: 220, gallery: 120, plain: 160, fault: 400, stair: 300, lake: 60, spire: 120, arch: 90 };
+const LANDMARK_DY = { eye: 900, waterfall: 220, gallery: 120, plain: 160, fault: 400, stair: 300, lake: 60, spire: 120, arch: 90, sinkhole: 20, hall: 14, window: 12, rookery: 30, basin: 60, fourthgate: 16 };
 
 const INTERACTION_TEXT = {
   hunt: (a, b) => [a, `Hunts the ${b}`, b, `Hunted by the ${a}`],
@@ -32,6 +34,13 @@ const INTERACTION_TEXT = {
   drink: (a) => [a, 'Drinks at streams and pools'],
   migrate: (a) => [a, 'Moves its home range with the group'],
   sleep: (a) => [a, 'Rests when inactive, hidden and still'],
+  mob: (a, b) => [a, `Mobs the ${b} in noisy groups to drive it away`, b, `Harassed by flocks of the ${a}`],
+  nest: (a) => [a, 'Lays eggs in a nest and guards them'],
+  guard: (a) => [a, 'Drives explorers away from its nest with threat calls'],
+  'guard-strike': (a) => [a, 'Dives at explorers who come too close to its nest'],
+  roost: (a) => [a, 'Returns to the same roost or nest to rest'],
+  investigate: (a) => [a, 'Approaches explorers out of curiosity'],
+  glide: (a) => [a, 'Launches from the wall and glides across the void'],
   'stalk-player': (a) => [a, 'Stalks explorers from the dark'],
   'charge-player': (a) => [a, 'Charges explorers without warning'],
   'attack-player': (a) => [a, 'Attacks explorers'],
@@ -39,7 +48,7 @@ const INTERACTION_TEXT = {
 
 const FORAGE_TEXT = {
   grass: 'Grazes on grass', moss: 'Grazes on moss and leaf litter', minerals: 'Grinds minerals from bare rock', crystal: 'Gnaws on crystal growths',
-  insects: 'Picks small insects', flowers: 'Feeds on flowers', fish: 'Catches fish',
+  insects: 'Picks small insects', flowers: 'Feeds on flowers', fish: 'Catches fish', lichen: 'Grazes glowing lichen from the rock',
 };
 
 export class Discovery {
@@ -113,7 +122,7 @@ export class Discovery {
       e = {
         id: sp.id, first: this.game.gameTime, sightings: 0, observe: 0, facts: new Set(['family', 'appearance']),
         interactions: new Map(), habitats: new Set(), behaviours: new Set(), firstDepth: Math.max(0, -p.y),
-        firstLayer: this.game.layerInfo ? this.game.layerInfo.layer : 0, call: false, maxSize: 0, minSize: 99, juveniles: false,
+        firstLayer: this.game.layerInfo ? this.game.layerInfo.layer : 0, call: false, maxSize: 0, minSize: 99, juveniles: false, subspecies: new Set(),
       };
       this.species.set(sp.id, e);
       this.emit('species', sp);
@@ -129,21 +138,29 @@ export class Discovery {
     const info = W.info(a.pos.x, a.pos.y, a.pos.z);
     const flags = W.flagsAt(a.pos.x, a.pos.z);
     const enclosed = W.ceilingAbove(a.pos.x, a.pos.y + 1, a.pos.z) < a.pos.y + 30;
-    if (a.ceil) return 'the ceilings of the Inverted Forest';
+    switch (a.mode) {
+      case 'cave': return a.pos.y < -1500 ? 'the deep caves of the Great Fault' : 'the caves of the Great Fault';
+      case 'wall': return 'the sheer walls of the Great Fault';
+      case 'hang': return a.sp.layer === 'layer3' ? 'roosts under the overhangs of the chasm' : 'roosts under overhangs';
+      case 'ceiling': return 'the ceilings of the Inverted Forest';
+      default: break;
+    }
     switch (a.band) {
-      case 0:
+      case BAND.SURF:
         if (info.zone === Z_CITY) return (flags & CF.BUILDING) ? 'rooftops and walls of the city' : 'the streets and gardens of the city';
         if (info.zone === Z_COUNTRY) return (flags & CF.FIELD) ? 'farmland around the city' : 'the countryside around the city';
         if (flags & CF.CAVE) return 'caves of Layer 1';
         if (!Number.isNaN(W.columnAt(a.pos.x, a.pos.z).water)) return 'rivers and lakes of Layer 1';
         if (a.airborne) return 'the skies over Layer 1';
         return info.r < info.Re + 90 ? 'the steep slopes near the Eye' : 'the terraces and meadows of Layer 1';
-      case 1: case 2: case 3:
+      case BAND.G0: case BAND.G1: case BAND.G2:
         if (a.airborne) return 'the canopy air of the Inverted Forest';
         return enclosed ? 'the floor of the Inverted Forest' : 'gallery ledges open to the Abyss';
-      case 4: return 'the Stone Plain';
-      case 5: return 'the depths of the Great Fault';
-      case 6: return 'the open air of the Abyss shaft';
+      case BAND.SHAFT: return 'the open air of the Abyss shaft';
+      case BAND.PLAIN: return 'the Stone Plain';
+      case BAND.CHASM: return a.airborne ? (a.pos.y < -1500 ? 'the dark air of the lower chasm' : 'the open void of the Great Fault') : 'nesting ledges in the Great Fault';
+      case BAND.CAVE3: return 'the caves of the Great Fault';
+      case BAND.BASIN: return 'the shores of the flooded basin';
       default: return 'the Abyss';
     }
   }
@@ -156,6 +173,7 @@ export class Discovery {
     e.maxSize = Math.max(e.maxSize, a.scale);
     e.minSize = Math.min(e.minSize, a.scale);
     if (a.juvenile) e.juveniles = true;
+    if (a.sub !== undefined) (e.subspecies || (e.subspecies = new Set())).add(a.sub);
     if (observing) {
       const mul = 1 + (this.game.artifacts?.mods?.scholar || 0);
       const before = e.observe;
@@ -183,6 +201,14 @@ export class Discovery {
       case 'drink': return 'Drinks at streams and pools';
       case 'hunt': return 'Stalks and chases prey';
       case 'symbiosis': return 'Stays beside a larger host animal';
+      case 'roost': return a.home && a.home.kind === 'roost' ? 'Roosts hanging under overhangs' : 'Returns home to rest';
+      case 'nest': return 'Tends eggs at its nest';
+      case 'mob': return 'Mobs predators in groups';
+      case 'guard': return 'Defends its nest against intruders';
+      case 'investigate': return 'Comes close to watch explorers';
+      case 'court': return 'Performs courtship displays';
+      case 'defend': return 'Defends a territory against rivals';
+      case 'flee': return a.mode === 'cave' ? 'Bolts into side passages when disturbed' : null;
       default: return null;
     }
   }
@@ -265,14 +291,22 @@ export class Discovery {
       }
       case 'forage': this.witness(a.sp, FORAGE_TEXT[d.kind] || 'Forages'); this.entry(a.sp).facts.add('diet'); break;
       case 'birth': {
-        this.witness(a.sp, `Gives birth to ${a.sp.behavior.reproduction.litter > 1 ? 'litters of young' : 'a single offspring'}`);
+        const R = a.sp.behavior.reproduction;
+        this.witness(a.sp, R.eggs ? 'Hatches young from eggs' : `Gives birth to ${R.clutch > 1 ? 'litters of young' : 'a single offspring'}`);
         this.entry(a.sp).facts.add('reproduction');
         this.entry(a.sp).juveniles = true;
         break;
       }
-      case 'court': case 'scavenge': case 'drink': case 'migrate': case 'sleep':
-      case 'stalk-player': case 'charge-player': case 'attack-player':
+      case 'mob': {
+        if (!d.b) break;
+        const [, ta, , tb] = INTERACTION_TEXT.mob(a.sp.name, d.b.sp.name);
+        this.witness(a.sp, ta, d.b.sp, tb);
+        break;
+      }
+      case 'court': case 'scavenge': case 'drink': case 'migrate': case 'sleep': case 'nest': case 'roost': case 'investigate': case 'glide':
+      case 'stalk-player': case 'charge-player': case 'attack-player': case 'guard': case 'guard-strike':
         this.witness(a.sp, INTERACTION_TEXT[type](a.sp.name)[1]);
+        if (type === 'nest') this.entry(a.sp).facts.add('reproduction');
         break;
       default: break;
     }
@@ -318,7 +352,7 @@ export class Discovery {
     const maxD = p.zoomed ? 160 : 50;
     let best = null, bs = Infinity;
     for (const a of eco.agents) {
-      if (a.dead || !a.obj.mesh.visible) continue;
+      if (a.dead || !a.obj || !a.visible) continue;
       const cx = a.pos.x - cam.x, cy = a.pos.y + a.scale * 0.4 - cam.y, cz = a.pos.z - cam.z;
       const d = Math.hypot(cx, cy, cz);
       if (d > maxD || d < 0.5) continue;
@@ -342,7 +376,7 @@ export class Discovery {
     const cosHalf = Math.cos((this.game.camera.fov * Math.PI / 180) * 0.6);
     let checks = 0;
     for (const a of eco.agents) {
-      if (a.dead || !a.obj.mesh.visible) continue;
+      if (a.dead || !a.obj || !a.visible) continue;
       const dx = a.pos.x - cam.x, dy = a.pos.y - cam.y, dz = a.pos.z - cam.z;
       const d = Math.hypot(dx, dy, dz);
       const range = 35 + a.scale * 18;
@@ -420,7 +454,7 @@ export class Discovery {
   // ------------------------------------------------------------------ persistence
   serialize() {
     return {
-      species: [...this.species.values()].map((e) => ({ ...e, facts: [...e.facts], interactions: [...e.interactions.entries()], habitats: [...e.habitats], behaviours: [...e.behaviours] })),
+      species: [...this.species.values()].map((e) => ({ ...e, facts: [...e.facts], interactions: [...e.interactions.entries()], habitats: [...e.habitats], behaviours: [...e.behaviours], subspecies: [...(e.subspecies || [])] })),
       landmarks: [...this.landmarks], layers: [...this.layers], routes: [...this.routes], spotted: [...this.spotted],
       found: [...this.found.entries()], log: this.log.slice(-120), stats: this.stats,
     };
@@ -428,7 +462,7 @@ export class Discovery {
 
   restore(s) {
     if (!s) return;
-    this.species = new Map((s.species || []).map((e) => [e.id, { ...e, facts: new Set(e.facts), interactions: new Map(e.interactions), habitats: new Set(e.habitats), behaviours: new Set(e.behaviours) }]));
+    this.species = new Map((s.species || []).map((e) => [e.id, { ...e, facts: new Set(e.facts), interactions: new Map(e.interactions), habitats: new Set(e.habitats), behaviours: new Set(e.behaviours), subspecies: new Set(e.subspecies || []) }]));
     this.landmarks = new Set(s.landmarks || []);
     this.layers = new Set(s.layers || []);
     this.routes = new Set(s.routes || []);

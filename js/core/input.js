@@ -1,5 +1,6 @@
 // Keyboard and mouse input with pointer lock and rebindable actions, plus
-// virtual actions and an analog movement axis fed by the touch controls.
+// virtual actions and an analog movement axis fed by the touch controls, and
+// the actions and look deltas fed by a gamepad (core/gamepad.js).
 
 export const DEFAULT_BINDINGS = {
   forward: ['KeyW', 'ArrowUp'],
@@ -44,6 +45,11 @@ export class Input {
     this.virtualDown = new Set();
     this.virtualPressed = new Set();
     this.axis = { x: 0, y: 0, active: false };
+    // gamepad: held and newly pressed actions, and look in radians this frame
+    this.padDown = new Set();
+    this.padPressed = new Set();
+    this.padLookX = 0;
+    this.padLookY = 0;
     window.addEventListener('keydown', (e) => {
       if (!this.enabled) return;
       const typing = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT');
@@ -53,7 +59,7 @@ export class Input {
       this.down.add(e.code);
     });
     window.addEventListener('keyup', (e) => this.down.delete(e.code));
-    window.addEventListener('blur', () => { this.down.clear(); this.buttons = 0; this.releaseVirtual(); });
+    window.addEventListener('blur', () => { this.down.clear(); this.buttons = 0; this.releaseVirtual(); this.padDown.clear(); });
     element.addEventListener('mousedown', (e) => {
       if (!this.locked) return;
       this.buttons |= 1 << e.button;
@@ -88,8 +94,8 @@ export class Input {
 
   unlock() { if (document.pointerLockElement) document.exitPointerLock(); }
 
-  is(action) { return this.virtualDown.has(action) || this.bindings[action].some((c) => this.down.has(c)); }
-  was(action) { return this.virtualPressed.has(action) || this.bindings[action].some((c) => this.pressed.has(c)); }
+  is(action) { return this.virtualDown.has(action) || this.padDown.has(action) || this.bindings[action].some((c) => this.down.has(c)); }
+  was(action) { return this.virtualPressed.has(action) || this.padPressed.has(action) || this.bindings[action].some((c) => this.pressed.has(c)); }
 
   /** Virtual (on-screen) action buttons. */
   press(action) { if (!this.virtualDown.has(action)) this.virtualPressed.add(action); this.virtualDown.add(action); }
@@ -100,6 +106,9 @@ export class Input {
   endFrame() {
     this.pressed.clear();
     this.virtualPressed.clear();
+    this.padPressed.clear();
+    this.padLookX = 0;
+    this.padLookY = 0;
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.wheel = 0;

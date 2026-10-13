@@ -32,12 +32,17 @@ export const M = {
   FUNGUS: 27,
   MEADOW: 28,
   SHAFTROCK: 29,
+  FAULTROCK: 30,
+  LICHEN: 31,
+  DEEPSTONE: 32,
+  NEST: 33,
 };
 
 /**
  * Per material properties.
  * color: base sRGB colour (0..1)
- * flag: shader effect (0 none, 1 window glow at night, 2 lava veins, 3 crystal glow, 4 fungus glow)
+ * flag: shader effect (0 none, 1 window glow at night, 2 lava veins, 3 crystal glow, 4 fungus glow,
+ *       5 rock strata (assigned by the mesher), 6 glow lichen)
  * sound: footstep class
  * natural: natural terrain (side faces resolve to dirt/rock strata)
  * food: forage tags for herbivores/lithophages
@@ -83,6 +88,10 @@ def(M.PATH, 'packed path', [0.6, 0.5, 0.36], { sound: 'dirt', natural: true });
 def(M.FUNGUS, 'glow fungus', [0.25, 0.4, 0.42], { sound: 'grass', natural: true, flag: 4, food: 'graze' });
 def(M.MEADOW, 'meadow', [0.48, 0.66, 0.26], { sound: 'grass', natural: true, food: 'graze' });
 def(M.SHAFTROCK, 'shaft rock', [0.42, 0.42, 0.42], { sound: 'stone', natural: true, food: 'mineral' });
+def(M.FAULTROCK, 'fault rock', [0.3, 0.24, 0.22], { sound: 'stone', natural: true, food: 'mineral' });
+def(M.LICHEN, 'glow lichen', [0.24, 0.34, 0.3], { sound: 'grass', natural: true, flag: 6, food: 'graze' });
+def(M.DEEPSTONE, 'abyssal limestone', [0.46, 0.5, 0.52], { sound: 'stone', natural: true, food: 'mineral' });
+def(M.NEST, 'woven nest', [0.46, 0.36, 0.24], { sound: 'wood' });
 
 export const MATERIAL_COUNT = MATERIALS.length;
 

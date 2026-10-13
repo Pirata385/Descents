@@ -5,10 +5,11 @@ import { RNG } from '../core/rng.js';
 import { M, MATERIALS } from './materials.js';
 import { hsl2rgb, mixRGB } from '../core/mathutil.js';
 import { LAYER_BOUNDARIES } from './layers.js';
+import { makeChasmParams } from './chasm.js';
 
 export const WORLD_HALF_X = 1500;      // 3000 hex columns wide (1 m per column)
 export const WORLD_HALF_Z = 1299;      // 3000 hex rows (0.866 m per row)
-export const BOTTOM_Y = -1120;
+export const BOTTOM_Y = -2060;
 export const SEA_Y = -26;
 
 const ROOF_PALETTES = [
@@ -49,6 +50,9 @@ export function makeParams(seed) {
   const faultR = rng.range(62, 84);
   const faultDist = rng.range(0.22, 0.42) * eyeR;
 
+  // Layer 3: the Great Fault chasm below the plain (its own stream)
+  const chasm = makeChasmParams(seed, plainY);
+
   // Palette
   const grassHue = rng.range(0.22, 0.33);
   const grass = hsl2rgb(grassHue, rng.range(0.42, 0.6), rng.range(0.36, 0.44));
@@ -85,7 +89,7 @@ export function makeParams(seed) {
 
   return {
     seed,
-    version: 1,
+    version: 2,
     worldHalfX: WORLD_HALF_X,
     worldHalfZ: WORLD_HALF_Z,
     bottomY: BOTTOM_Y,
@@ -113,9 +117,12 @@ export function makeParams(seed) {
       x: Math.cos(faultAngle) * faultDist,
       z: Math.sin(faultAngle) * faultDist,
       r: faultR,
-      bottomY: plainY - rng.range(215, 240),
-      thresholdY: LAYER_BOUNDARIES.layer3Top - rng.range(45, 65),
+      bottomY: chasm.floorY,
+      // two retired draws (the old fault floor and threshold) keep the
+      // parameters that follow identical for a given seed
+      ...(rng.range(0, 1), rng.range(0, 1), {}),
     },
+    chasm,
     spiral: {
       startAngle: rng.range(0, Math.PI * 2),
       dir: rng.chance(0.5) ? 1 : -1,

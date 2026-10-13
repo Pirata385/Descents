@@ -105,13 +105,16 @@ await page.waitForTimeout(2500);
 await shot('s4-catalog-artifact');
 await page.evaluate(() => { window.__app.closeJournal(true); window.__descents.paused = true; });
 // 5. deep places
-for (const [name, where] of [['s5-gallery', 'gallery'], ['s6-plain', 'plain'], ['s7-fault', 'fault']]) {
+for (const [name, where] of [['s5-gallery', 'gallery'], ['s6-plain', 'plain'], ['s7-cave', 'cave'], ['s7b-fault', 'fault'], ['s7c-basin', 'basin'], ['s7d-gate', 'gate']]) {
   const info = await page.evaluate((w) => {
     const g = window.__descents, plan = g.plan, f = g.world.field, p = g.player;
     let x, z, y, tx, ty, tz;
     if (w === 'gallery') { const gw = plan.galleryWindows[0]; const Re = f.tab(f.eyeTab, gw.th); [x, z] = f.fromPolar(Re + 30, gw.th); y = g.world.floorBelow(x, gw.y + 5, z); [tx, tz] = f.fromPolar(Re + 80, gw.th + 0.2); ty = y + 6; }
-    else if (w === 'plain') { const t = plan.threshold; x = t.x * 2; z = t.z * 2; y = g.world.floorBelow(x, plan.params.plainY + 30, z); tx = t.x; tz = t.z; ty = y - 5; }
-    else { const t = plan.threshold; x = t.x; z = t.z; y = t.y; tx = plan.params.fault.x; tz = plan.params.fault.z; ty = y - 30; }
+    else if (w === 'plain') { const sk = plan.fault.sinkholes[0]; x = sk.x + 16; z = sk.z + 4; y = g.world.floorBelow(x, plan.params.plainY + 30, z); tx = sk.x; tz = sk.z; ty = y - 4; }
+    else if (w === 'cave') { const h = plan.fault.halls[3]; x = h.x; z = h.z; y = g.world.floorBelow(x, h.y + 2, z); tx = h.x + 8; tz = h.z + 3; ty = y + 1; }
+    else if (w === 'fault') { const fw = plan.fault.windows[0]; x = fw.x; z = fw.z; y = g.world.floorBelow(x, fw.y + 2, z); tx = plan.params.fault.x; tz = plan.params.fault.z; ty = y - 40; }
+    else if (w === 'basin') { const e = plan.fault.exit; const b = plan.fault.basin; x = e.x; z = e.z; y = g.world.floorBelow(x, e.y + 3, z); tx = b.x; tz = b.z; ty = y + 25; }
+    else { const gt = plan.fault.gate.mouth; const b = plan.fault.basin; x = gt.x + (b.x - gt.x) * 0.25; z = gt.z + (b.z - gt.z) * 0.25; y = g.world.floorBelow(x, gt.y + 4, z); tx = gt.x; tz = gt.z; ty = gt.y + 6; }
     p.pos.set(x, y, z); p.vel.set(0, 0, 0); p.safe = [p.pos.clone()];
     window.__lookAt = [tx, ty, tz];
     return { x: Math.round(x), y: Math.round(y), z: Math.round(z) };

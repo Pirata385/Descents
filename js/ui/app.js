@@ -10,26 +10,46 @@ import { ArtifactSystem } from '../artifacts/artifacts.js';
 import { Discovery } from '../systems/discovery.js';
 import { MapData } from '../systems/mapdata.js';
 import { EnvironmentProbe } from '../systems/environment.js';
-import { SaveStore, captureSave, applySave, exportSave, validateSave } from '../systems/save.js';
+import { SaveStore, captureSave, applySave, exportSave, validateSave, isLegacySave } from '../systems/save.js';
 import { AudioEngine } from '../audio/audio.js';
 import { HUD } from './hud.js';
 import { TouchControls, detectTouch } from './touch.js';
 import { Journal } from './journal.js';
 import { LAYERS } from '../world/layers.js';
-import { FAMILY_LABEL } from '../creatures/genetics.js';
+import { FAMILY_LABEL } from '../creatures/genome.js';
+import { GamepadInput, GLYPH } from '../core/gamepad.js';
 
 const SETTINGS_KEY = 'descents.settings.v1';
+// graphics presets; changing any of these values by hand makes the preset 'custom'
+const QUALITY = {
+  low: { viewDistance: 0.55, pixelRatio: 0.75, shadows: false, shadowSize: 1024, particles: 0.35, creatures: 32 },
+  medium: { viewDistance: 0.8, pixelRatio: 1, shadows: true, shadowSize: 1024, particles: 0.6, creatures: 48 },
+  high: { viewDistance: 1.0, pixelRatio: 1.5, shadows: true, shadowSize: 2048, particles: 1, creatures: 60 },
+  ultra: { viewDistance: 1.4, pixelRatio: 2, shadows: true, shadowSize: 4096, particles: 1, creatures: 84 },
+};
+const QUALITY_KEYS = ['viewDistance', 'pixelRatio', 'shadows', 'particles', 'creatures'];
+function presetOf(s) {
+  for (const [name, q] of Object.entries(QUALITY)) if (QUALITY_KEYS.every((k) => s[k] === q[k])) return name;
+  return 'custom';
+}
+
 const DEFAULT_SETTINGS = {
+  quality: 'high', shadowSize: 2048, creatures: 60,
   viewDistance: 1.0, shadows: true, fov: 75, sensitivity: 1, invertY: false, pixelRatio: 1.5, particles: 1,
   volMaster: 0.8, volMusic: 0.5, volAmbience: 0.7, volEffects: 0.8, showArm: true, showFps: false, autoQuality: true,
   touchControls: 'auto', touchLook: 1, touchSize: 1, touchOpacity: 0.85,
+  padLook: 1, padDeadzone: 0.15, rumble: true,
 };
 // lighter defaults the first time the game runs on a phone or tablet
-const MOBILE_DEFAULTS = { viewDistance: 0.6, pixelRatio: 1, shadows: false, particles: 0.5, antialias: false };
+const MOBILE_DEFAULTS = { ...QUALITY.low, antialias: false };
 
 const TIPS = [
   'The Abyss Eye sits at the centre of the world. Every route down begins at its rim.',
-  'Creatures of the first two layers ignore explorers. Below that, be careful.',
+  'Creatures of the first two layers ignore explorers. In the Great Fault, keep clear of nests.',
+  'There is no stair into the Great Fault: look for the swallets in the Stone Plain and follow the caves down.',
+  'Windows in the fault walls look out over the chasm. Swifts and falcons nest on the ledges around them.',
+  'No two creatures of a species are alike. Regional forms differ in build, crests and colour.',
+  'A PS4 controller works everywhere, menus and journal included. Press any button to connect it.',
   'Hold F to study a creature. Patience reveals what it eats and how it lives.',
   'The grappling arm reaches 60 metres. Reel in to climb, pay out to rappel.',
   'Artifacts rest where few would look: ruins, cave chambers, the tops of spires.',
@@ -53,6 +73,22 @@ const CONTROLS = [
   ['E', 'Take an artifact'], ['F (hold)', 'Observe creatures (zoom)'], ['R', 'Use an artifact ability'], ['L', "Explorer's lamp"],
   ['M', 'Map'], ['N', 'Vertical abyss map'], ['J / Tab', 'Creature catalog'], ['I', 'Equipment'], ['Esc / P', 'Pause'],
 ];
+
+// PlayStation 4 controller (DualShock 4); any standard-mapping gamepad uses the same positions
+const PAD_CONTROLS = [
+  [`${GLYPH.lstick} stick`, 'Move · push up or down to climb'], [GLYPH.L3, 'Run (toggle; stopping ends it)'], [`${GLYPH.rstick} stick`, 'Look'],
+  [GLYPH.cross, 'Jump · hold against a wall to climb · let go of the cable'], [GLYPH.circle, 'Crouch · drop from a wall'],
+  [GLYPH.square, 'Take an artifact'], [`${GLYPH.triangle} / ${GLYPH.R3} (hold)`, 'Observe creatures (zoom)'],
+  [GLYPH.R2, 'Fire / release the grappling arm'], [GLYPH.L2, 'Reel in the cable'], [GLYPH.L1, 'Pay out the cable'], [GLYPH.R1, 'Release the cable'],
+  [GLYPH.up, "Explorer's lamp"], [GLYPH.down, 'Use an artifact ability'], [`${GLYPH.left} ${GLYPH.right}`, 'Map · vertical abyss map'],
+  [GLYPH.share, 'Creature catalog'], [GLYPH.touchpad, 'Equipment'], [GLYPH.options, 'Pause'],
+  ['Menus', `D-pad or left stick to choose · ${GLYPH.cross} select · ${GLYPH.circle} back · ${GLYPH.L1} ${GLYPH.R1} journal tabs · right stick scrolls (on the map it pans; ${GLYPH.L2} ${GLYPH.R2} zoom)`],
+];
+
+function padTable(show) {
+  if (!show) return '';
+  return `<h3>PS4 controller</h3><table class="controls">${PAD_CONTROLS.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>`;
+}
 
 function hasSavedSettings() {
   try { return !!localStorage.getItem(SETTINGS_KEY); } catch { return false; }
@@ -83,6 +119,8 @@ export class App {
     this.settings = loadSettings();
     this.touch = detectTouch(this.settings);
     if (this.touch && fresh) Object.assign(this.settings, MOBILE_DEFAULTS);
+    this.settings.quality = presetOf(this.settings);
+    this.dynScale = 1;
     document.body.classList.toggle('touch', this.touch);
     this.audio = new AudioEngine(this.settings);
     this.state = 'title';
@@ -90,7 +128,21 @@ export class App {
     this.screen = document.createElement('div');
     this.screen.className = 'screen';
     this.ui.appendChild(this.screen);
-    window.addEventListener('keydown', (e) => this.onKey(e));
+    window.addEventListener('keydown', (e) => { this.setInputDevice(this.touch ? 'touch' : 'kbm'); this.onKey(e); });
+    // whichever device was used last decides the prompts and the touch buttons
+    // (mouse events that browsers emulate after a tap do not count as the mouse)
+    const realMouse = (e) => !(e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) && performance.now() - (this.touchT || -1e9) > 1000;
+    window.addEventListener('mousedown', (e) => { if (realMouse(e)) this.setInputDevice('kbm'); });
+    window.addEventListener('mousemove', (e) => {
+      // ignore the jump some browsers report as the pointer locks
+      const m = Math.abs(e.movementX || 0) + Math.abs(e.movementY || 0);
+      if (m > 4 && m < 250 && realMouse(e) && !(this.game && performance.now() - this.game.input.lockTime < 400)) this.setInputDevice('kbm');
+    });
+    window.addEventListener('touchstart', () => { this.touchT = performance.now(); this.setInputDevice('touch'); }, { passive: true, capture: true });
+    this.device = this.touch ? 'touch' : 'kbm';
+    this.pad = new GamepadInput(this);
+    // after playing with a controller (no pointer lock), a click takes the mouse back
+    canvas.addEventListener('click', () => { if (this.state === 'playing' && !this.touch && this.game && !this.game.input.locked) this.game.input.lock(); });
     // phones: play in landscape; turning to portrait pauses (the overlay asks to rotate back)
     const onTurn = () => { this.needsRedraw = true; this.checkOrientation(); };
     window.addEventListener('resize', onTurn);
@@ -101,6 +153,37 @@ export class App {
   }
 
   isPortrait() { return window.innerHeight > window.innerWidth; }
+
+  /** 'kbm', 'touch' or 'pad': prompts, glyphs and the touch buttons follow the device in use. */
+  setInputDevice(dev) {
+    if (!dev) dev = this.touch ? 'touch' : 'kbm';
+    if (dev === this.device) return;
+    this.device = dev;
+    if (dev !== 'pad' && this.pad && this.pad.active) { this.pad.active = false; this.pad.clearFocus(); this.pad.releaseGame(); }
+    document.body.classList.toggle('gamepad', dev === 'pad');
+    if (this.game) this.game.pad = dev === 'pad';
+    if (this.touchUI) this.touchUI.setVisible(this.touch && dev !== 'pad' && this.state === 'playing');
+    if (this.state === 'resume') {
+      // only the wording changes: rebuilding the screen mid-click would swallow the click
+      const m = this.screen.querySelector('.click-msg');
+      if (m) m.textContent = this.clickWording(this.clickText);
+    }
+  }
+
+  clickWording(text = 'Click to continue the descent') {
+    if (this.device === 'pad') return text.replace(/^Click/, 'Press ✕');
+    if (this.touch) return text.replace(/^Click/, 'Tap');
+    return text;
+  }
+
+  /** Options on the controller, or the controller was disconnected mid-play. */
+  pauseFromPad() {
+    if (this.state !== 'playing') return;
+    if (document.pointerLockElement) { this.wantUnlock = true; this.game.input.unlock(); }
+    this.showPause();
+  }
+
+  showPauseFromPad() { if (this.device === 'pad') this.pauseFromPad(); }
 
   checkOrientation() {
     if (!this.touch) return;
@@ -173,7 +256,7 @@ export class App {
         <h2>Expeditions</h2>
         <div class="save-list">${list.map((m) => `
           <div class="save-item">
-            <div><b>${esc(m.name)}</b>${m.auto ? ' <span class="muted">(autosave)</span>' : ''}<br><span class="muted">${fmtDate(m.time)} · seed “${esc(m.seedLabel)}” · ${m.depth} m · ${LAYERS[m.layer]?.title || ''} · ${m.species} species · ${m.artifacts} artifacts</span></div>
+            <div><b>${esc(m.name)}</b>${m.auto ? ' <span class="muted">(autosave)</span>' : ''}${(m.version || 1) < 2 ? ' <span class="muted">(older version: begins anew)</span>' : ''}<br><span class="muted">${fmtDate(m.time)} · seed “${esc(m.seedLabel)}” · ${m.depth} m · ${LAYERS[m.layer]?.title || ''} · ${m.species} species · ${m.artifacts} artifacts</span></div>
             <div class="row"><button class="btn small" data-load="${esc(m.id)}">Load</button><button class="btn small" data-export="${esc(m.id)}">Export</button><button class="btn small danger" data-del="${esc(m.id)}">Delete</button></div>
           </div>`).join('') || '<p class="muted">No saved expeditions yet.</p>'}</div>
         <div class="row">
@@ -218,17 +301,23 @@ export class App {
       <div class="panel settings">
         <h2>Settings</h2>
         <h3>Graphics</h3>
-        ${slider('viewDistance', 'View distance', 0.5, 1.6, 0.1, (v) => `${Math.round(v * 100)}%`)}
+        <div class="set-row"><label>Quality</label><select data-key="quality">${[['low', 'Low (phones, older laptops)'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra'], ['custom', 'Custom']].map(([v, l]) => `<option value="${v}" ${s.quality === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span class="val"></span></div>
+        ${slider('viewDistance', 'View distance', 0.5, 1.6, 0.05, (v) => `${Math.round(v * 100)}%`)}
         ${slider('pixelRatio', 'Resolution scale', 0.5, 2, 0.25, (v) => `${v}×`)}
-        ${slider('particles', 'Particles', 0, 1, 0.25, (v) => `${Math.round(v * 100)}%`)}
+        ${slider('particles', 'Particles', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`)}
+        ${slider('creatures', 'Creatures nearby', 16, 96, 4, (v) => `${v}`)}
         ${check('shadows', 'Shadows')}
-        ${check('autoQuality', 'Adapt view distance to keep the frame rate smooth')}
+        ${check('autoQuality', 'Adapt resolution and view distance to keep the frame rate smooth')}
         ${slider('fov', 'Field of view', 60, 100, 1, (v) => `${v}°`)}
         ${check('showArm', 'Show the grappling arm')}
         ${check('showFps', 'Show frame rate')}
         <h3>Controls</h3>
         ${slider('sensitivity', 'Mouse sensitivity', 0.2, 3, 0.05, (v) => Number(v).toFixed(2))}
         ${check('invertY', 'Invert vertical look')}
+        <h3>Controller</h3>
+        ${slider('padLook', 'Stick look speed', 0.3, 3, 0.05, (v) => Number(v).toFixed(2))}
+        ${slider('padDeadzone', 'Stick dead zone', 0.05, 0.35, 0.01, (v) => Number(v).toFixed(2))}
+        ${check('rumble', 'Vibration')}
         <h3>Touch</h3>
         <div class="set-row"><label>Touch controls</label><select data-key="touchControls">${[['auto', 'Automatic'], ['on', 'On'], ['off', 'Off']].map(([v, l]) => `<option value="${v}" ${s.touchControls === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span class="val"></span></div>
         ${slider('touchLook', 'Touch look speed', 0.4, 3, 0.05, (v) => Number(v).toFixed(2))}
@@ -250,13 +339,29 @@ export class App {
         s[key] = el.type === 'checkbox' ? el.checked : Number(el.value);
         if (valEl) {
           const v = s[key];
-          valEl.textContent = key === 'viewDistance' || key === 'particles' || key.startsWith('vol') || key === 'touchSize' || key === 'touchOpacity' ? `${Math.round(v * 100)}%` : key === 'fov' ? `${v}°` : key === 'pixelRatio' ? `${v}×` : Number(v).toFixed(2);
+          valEl.textContent = key === 'viewDistance' || key === 'particles' || key.startsWith('vol') || key === 'touchSize' || key === 'touchOpacity' ? `${Math.round(v * 100)}%` : key === 'fov' ? `${v}°` : key === 'pixelRatio' ? `${v}×` : key === 'creatures' ? `${v}` : Number(v).toFixed(2);
+        }
+        if (QUALITY_KEYS.includes(key)) {
+          s.quality = presetOf(s);
+          const q = this.screen.querySelector('select[data-key=quality]');
+          if (q) q.value = s.quality;
         }
         this.applySettings(key);
       };
     });
     this.screen.querySelectorAll('select[data-key]').forEach((el) => {
-      el.onchange = () => { s[el.dataset.key] = el.value; this.applySettings(el.dataset.key); };
+      el.onchange = () => {
+        const key = el.dataset.key;
+        s[key] = el.value;
+        if (key === 'quality' && QUALITY[el.value]) {
+          // a preset sets every graphics value at once
+          Object.assign(s, QUALITY[el.value]);
+          for (const k of [...QUALITY_KEYS, 'shadowSize']) this.applySettings(k);
+          this.showSettings(back);
+          return;
+        }
+        this.applySettings(key);
+      };
     });
     this.screen.querySelector('[data-act=defaults]').onclick = () => { Object.assign(s, DEFAULT_SETTINGS); for (const k of Object.keys(s)) this.applySettings(k); this.showSettings(back); };
     this.screen.querySelector('[data-act=back]').onclick = () => { saveSettings(s); back === 'pause' ? this.showPause() : this.showTitle(); };
@@ -271,7 +376,9 @@ export class App {
     if (!g || !g.renderer) return;
     if (key === 'viewDistance') g.chunks.setQuality(this.settings.viewDistance);
     if (key === 'shadows') g.renderer.setShadows(this.settings.shadows);
-    if (key === 'pixelRatio') g.renderer.setPixelRatio(this.settings.pixelRatio);
+    if (key === 'shadowSize') g.renderer.setShadowSize(this.settings.shadowSize);
+    if (key === 'pixelRatio') { this.dynScale = 1; g.renderer.setPixelRatio(this.settings.pixelRatio); }
+    if (key === 'creatures' && g.ecosystem) g.ecosystem.maxAgents = this.settings.creatures;
   }
 
   showControls(back) {
@@ -280,8 +387,11 @@ export class App {
       ${back === 'title' ? '<div class="title-bg"></div>' : ''}
       <div class="panel">
         <h2>Controls</h2>
-        ${this.touch ? `<h3>Touch</h3><table class="controls">${TOUCH_CONTROLS.map(([k, v]) => `<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(v)}</td></tr>`).join('')}</table><h3>Keyboard &amp; mouse</h3>` : ''}
+        ${this.touch ? `<h3>Touch</h3><table class="controls">${TOUCH_CONTROLS.map(([k, v]) => `<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(v)}</td></tr>`).join('')}</table>` : ''}
+        ${padTable(this.device === 'pad')}
+        <h3>Keyboard &amp; mouse</h3>
         <table class="controls">${CONTROLS.map(([k, v]) => `<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(v)}</td></tr>`).join('')}</table>
+        ${padTable(this.device !== 'pad')}
         <p class="muted">Climb rock by ${this.touch ? 'holding Jump' : 'holding <kbd>Space</kbd>'} while walking into a wall; stamina drains while climbing. Ledges within reach are mantled automatically. Running into water lets you swim; rivers carry you with their current.</p>
         <div class="row"><button class="btn primary" data-act="back">Back</button></div>
       </div>`;
@@ -335,7 +445,8 @@ export class App {
   }
 
   showClickToPlay(text = 'Click to continue the descent') {
-    if (this.touch) text = text.replace(/^Click/, 'Tap');
+    this.clickText = text;
+    text = this.clickWording(text);
     this.screen.className = 'screen click-screen';
     this.screen.innerHTML = `<div class="click-msg">${esc(text)}</div>`;
     this.screen.onclick = () => { this.screen.onclick = null; this.resume(); };
@@ -361,7 +472,7 @@ export class App {
     g.uiBlocking = !playing;
     g.paused = st === 'paused' || st === 'journal' || st === 'resume';
     if (this.hud) this.hud.setVisible(st === 'playing' || st === 'resume');
-    if (this.touchUI) this.touchUI.setVisible(this.touch && playing);
+    if (this.touchUI) this.touchUI.setVisible(this.touch && playing && this.device !== 'pad');
     if (this.audio.ready) this.audio.suspend(st === 'paused');
   }
 
@@ -376,8 +487,7 @@ export class App {
 
   openJournal(tab) {
     if (!this.game || !this.game.player) return;
-    this.wantUnlock = true;
-    this.game.input.unlock();
+    if (document.pointerLockElement) { this.wantUnlock = true; this.game.input.unlock(); }
     this.hideScreen();
     this.setState('journal');
     this.journal.show(tab);
@@ -399,7 +509,7 @@ export class App {
     const tabFor = { KeyM: 'map', KeyN: 'abyss', KeyJ: 'creatures', Tab: 'creatures', KeyI: 'equipment' }[code];
     if (this.state === 'playing') {
       if (tabFor) { e.preventDefault(); this.openJournal(tabFor); return; }
-      if (code === 'Escape' || code === 'KeyP') { this.wantUnlock = true; this.game.input.unlock(); this.showPause(); }
+      if (code === 'Escape' || code === 'KeyP') { if (document.pointerLockElement) { this.wantUnlock = true; this.game.input.unlock(); } this.showPause(); }
     } else if (this.state === 'journal') {
       if (code === 'Escape') { this.closeJournal(false); return; }
       if (tabFor) {
@@ -419,6 +529,14 @@ export class App {
 
   // ------------------------------------------------------------------ game
   async startGame({ seedLabel, save = null }) {
+    let legacy = false;
+    if (save && isLegacySave(save)) {
+      // the world below the plain and its creatures changed since this save:
+      // the same seed starts again from the rim
+      legacy = true;
+      seedLabel = save.seedLabel || String(save.seed);
+      save = null;
+    }
     this.showLoading();
     const game = this.game = new Game(this.canvas, this.settings, {
       onProgress: (stage, p) => this.setProgress(stage, p),
@@ -443,6 +561,7 @@ export class App {
     this.setState('resume');
     this.showClickToPlay(save ? 'Click to continue the descent' : 'Click to begin the descent');
     if (!save) this.introHints();
+    if (legacy) this.hud.notify('This expedition was saved by an older version. The Abyss has changed below the Stone Plain, so it begins anew.', 'info', 12);
     window.__ready = true;
   }
 
@@ -450,6 +569,7 @@ export class App {
   attachSystems(g, save) {
     const plan = g.plan;
     g.touch = this.touch;
+    g.pad = this.device === 'pad';
     const p = new Player(g);
     const s = plan.spawn;
     p.spawn(s.x, s.y, s.z, s.yaw);
@@ -491,16 +611,17 @@ export class App {
   wireEvents(g) {
     const A = this.audio, H = this.hud, p = g.player, gr = g.grapple;
     p.on('step', (kind, speed, wet) => A.footstep(kind, speed, wet));
-    p.on('land', (impact, kind) => A.land(impact, kind));
+    const R = this.pad;
+    p.on('land', (impact, kind) => { A.land(impact, kind); if (impact > 6) R.rumble(120, Math.min(1, impact / 18), 0.3); });
     p.on('jump', () => A.play('jump'));
-    p.on('hurt', (amt) => { A.play('hurt'); H.flashHurt(amt); });
-    p.on('death', () => A.play('death'));
+    p.on('hurt', (amt) => { A.play('hurt'); H.flashHurt(amt); R.rumble(220, 0.4 + Math.min(0.6, amt / 40), 0.6); });
+    p.on('death', () => { A.play('death'); R.rumble(700, 1, 0.8); });
     p.on('respawn', () => A.play('respawn'));
     p.on('splash', () => A.play('splash'));
     p.on('mantle', () => A.play('mantle'));
     p.on('grab', () => A.play('grab'));
-    gr.on('fire', () => A.play('grapple-fire'));
-    gr.on('attach', () => A.play('grapple-attach', gr.anchor));
+    gr.on('fire', () => { A.play('grapple-fire'); R.rumble(60, 0, 0.45); });
+    gr.on('attach', () => { A.play('grapple-attach', gr.anchor); R.rumble(90, 0.15, 0.7); });
     gr.on('miss', () => A.play('grapple-miss'));
     gr.on('release', () => A.play('grapple-release'));
     gr.on('stowed', () => A.play('grapple-stow'));
@@ -563,7 +684,14 @@ export class App {
 
   introHints() {
     const H = this.hud;
-    const seq = this.touch ? [
+    const G = GLYPH;
+    const seq = this.device === 'pad' ? [
+      [1, `Left stick moves (${G.L3} to run) · right stick looks · ${G.cross} jump`],
+      [11, 'The Abyss Eye lies at the centre of the world. Head for the gates in the rim wall to start your descent.'],
+      [22, `${G.R2} fires the grappling arm · ${G.L2} reels in · ${G.L1} pays out · ${G.R1} lets go`],
+      [34, `Hold ${G.triangle} to observe creatures · ${G.square} takes artifacts · ${G.up} lamp`],
+      [46, `${G.left} map · ${G.right} vertical abyss map · ${G.share} catalog · ${G.touchpad} equipment`],
+    ] : this.touch ? [
       [1, 'Drag on the left to move (push fully to run) · drag on the right to look'],
       [11, 'The Abyss Eye lies at the centre of the world. Head for the gates in the rim wall to start your descent.'],
       [22, '<b>Arm</b> fires the grappling claw where you aim · <b>Reel in</b> and <b>Pay out</b> appear once it bites'],
@@ -594,11 +722,7 @@ export class App {
       this.restlessT = (this.restlessT || 0) - dt;
       if (this.restlessT <= 0) {
         this.restlessT = 6;
-        for (const a of g.ecosystem.agentsNear(p.pos, 35)) {
-          if (a.sp.behavior.diet === 'carnivore' || a.airborne || a.state === 'flee' || a.state === 'hunt') continue;
-          a.state = 'wander'; a.target = { pos: p.pos.clone().add({ x: Math.random() * 4 - 2, y: 0, z: Math.random() * 4 - 2 }) }; a.timer = 6;
-          break;
-        }
+        g.ecosystem.attract(p.pos, 6);
       }
     }
     // autosave
@@ -606,24 +730,44 @@ export class App {
     if (this.autosaveTimer <= 0) { this.autosaveTimer = 120; if (p.mode !== 'dead' && p.onGround) this.save(true); }
   }
 
-  /** Keep the frame rate playable on slower machines by trading view distance. */
+  /**
+   * Keep the frame rate playable on slower machines: first lower the
+   * rendering resolution (instant, no rebuild), then the view distance; give
+   * both back when there is headroom again.
+   */
   adaptQuality() {
     const now = performance.now();
     const ms = this.lastFrameT ? now - this.lastFrameT : 16;
     this.lastFrameT = now;
     if (ms > 250) return; // a hitch (tab switch, loading), not a trend
-    this.frameEma = (this.frameEma ?? 16) * 0.97 + ms * 0.03;
+    this.frameEma = (this.frameEma ?? 16) * 0.95 + ms * 0.05;
     const s = this.settings, g = this.game;
     if (!s.autoQuality || this.state !== 'playing') return;
     this.qualityT = (this.qualityT || 0) + ms / 1000;
-    if (this.qualityT < 4) return;
+    if (this.qualityT < 1.5) return;
     this.qualityT = 0;
+    // phones aim for a steady 30+, computers for 50+
+    const target = this.touch ? 30 : 20;
     const cur = g.chunks.quality ?? s.viewDistance;
-    if (this.frameEma > 40 && cur > 0.55) {
-      g.chunks.setQuality(Math.max(0.5, cur - 0.1));
-      if (!this.qualityNoted) { this.qualityNoted = true; this.hud.notify('Lowering view distance to keep the frame rate smooth (see Settings).', 'info', 6); }
-    } else if (this.frameEma < 18 && cur < s.viewDistance - 0.01) {
-      g.chunks.setQuality(Math.min(s.viewDistance, cur + 0.1));
+    const setRes = (k) => {
+      if (Math.abs(k - this.dynScale) < 0.02) return;
+      this.dynScale = k;
+      g.renderer.setPixelRatio(s.pixelRatio * k);
+    };
+    if (this.frameEma > target * 1.2) {
+      this.slowT = (this.slowT || 0) + 1;
+      this.fastT = 0;
+      if (this.dynScale > 0.62) setRes(Math.max(0.6, this.dynScale * 0.88));
+      else if (this.slowT > 2 && cur > 0.55) {
+        this.slowT = 0;
+        g.chunks.setQuality(Math.max(0.5, cur - 0.1));
+        if (!this.qualityNoted) { this.qualityNoted = true; this.hud.notify('Lowering view distance to keep the frame rate smooth (see Settings).', 'info', 6); }
+      }
+    } else if (this.frameEma < target * 0.8) {
+      this.slowT = 0;
+      this.fastT = (this.fastT || 0) + 1;
+      if (cur < s.viewDistance - 0.01) { if (this.fastT > 2) { this.fastT = 0; g.chunks.setQuality(Math.min(s.viewDistance, cur + 0.1)); } }
+      else if (this.dynScale < 1) setRes(Math.min(1, this.dynScale * 1.06));
     }
   }
 
@@ -633,7 +777,7 @@ export class App {
     const e = g.envProbe.state, info = g.layerInfo || { layer: 0 };
     this.audio.update(dt, {
       pos: g.player.pos, layer: info.layer, zone: info.zone, enclosed: g.envEnclosed || 0, altitude: e.altitude,
-      water: e.water, river: e.river, fall: e.fall, city: e.city, night: g.renderer.night > 0.5,
+      water: e.water, river: e.river, fall: e.fall, city: e.city, chasm: e.chasm, night: g.renderer.night > 0.5,
       reeling: g.grapple.attached && g.grapple.reeling, paying: g.grapple.attached && g.grapple.paying,
     }, g.camera);
   }
