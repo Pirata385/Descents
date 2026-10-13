@@ -267,7 +267,8 @@ function makeSpecies(seed, layer, niche, index, names, used) {
         eggs: plan === 'avian' || family === 'reptile' || family === 'arthropod',
       },
       lifespan: clamp(1400 + size * 700, 800, 5000),
-      playerAware: N.diet === 'carnivore' && size > 1.8 ? 'predator' : null,
+      // creatures of the upper layers ignore explorers; only large deep hunters stalk them
+      playerAware: N.diet === 'carnivore' && size > 1.8 && layer.index >= 3 ? 'predator' : null,
     },
     call: callFor(rng, family, plan, size),
     relations: { prey: [], predators: [], competitors: [], symbiontOf: null, hosts: [], mobs: [], nestsNear: [] },

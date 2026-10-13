@@ -36,6 +36,8 @@ const INTERACTION_TEXT = {
   sleep: (a) => [a, 'Rests when inactive, hidden and still'],
   mob: (a, b) => [a, `Mobs the ${b} in noisy groups to drive it away`, b, `Harassed by flocks of the ${a}`],
   nest: (a) => [a, 'Lays eggs in a nest and guards them'],
+  guard: (a) => [a, 'Drives explorers away from its nest with threat calls'],
+  'guard-strike': (a) => [a, 'Dives at explorers who come too close to its nest'],
   roost: (a) => [a, 'Returns to the same roost or nest to rest'],
   investigate: (a) => [a, 'Approaches explorers out of curiosity'],
   glide: (a) => [a, 'Launches from the wall and glides across the void'],
@@ -202,6 +204,7 @@ export class Discovery {
       case 'roost': return a.home && a.home.kind === 'roost' ? 'Roosts hanging under overhangs' : 'Returns home to rest';
       case 'nest': return 'Tends eggs at its nest';
       case 'mob': return 'Mobs predators in groups';
+      case 'guard': return 'Defends its nest against intruders';
       case 'investigate': return 'Comes close to watch explorers';
       case 'court': return 'Performs courtship displays';
       case 'defend': return 'Defends a territory against rivals';
@@ -301,7 +304,7 @@ export class Discovery {
         break;
       }
       case 'court': case 'scavenge': case 'drink': case 'migrate': case 'sleep': case 'nest': case 'roost': case 'investigate': case 'glide':
-      case 'stalk-player': case 'charge-player': case 'attack-player':
+      case 'stalk-player': case 'charge-player': case 'attack-player': case 'guard': case 'guard-strike':
         this.witness(a.sp, INTERACTION_TEXT[type](a.sp.name)[1]);
         if (type === 'nest') this.entry(a.sp).facts.add('reproduction');
         break;

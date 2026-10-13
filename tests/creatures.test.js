@@ -165,6 +165,7 @@ export async function creatureTests(seeds, plans) {
       }
       assert(L3.some((s) => s.relations.mobs.length), `${seed}: no chasm flier mobs its predators`);
       assert(sp.filter((s) => s.layer === 'layer3').every((s) => !s.behavior.playerAware), 'Layer 3 fauna is small and must not hunt the explorer');
+      assert(sp.filter((s) => s.layerIndex < 3).every((s) => !s.behavior.playerAware), 'creatures of the upper layers ignore explorers');
     }
     note(`symbiotic pairs in ${sym}/${seeds.length * 3} layer ecologies`);
     assert(sym >= 1, 'no symbiosis anywhere');
@@ -268,6 +269,33 @@ export async function creatureTests(seeds, plans) {
     assert(air.length >= 2, 'nothing flies in the chasm');
     assert(outside <= Math.max(1, air.length * 0.1), `${outside} fliers flew into the rock`);
     assert(wall.length + home.length >= 1, 'nothing climbs the walls or rests at a roost or nest');
+  });
+
+  await test('Layer 3 nests: parents drive an explorer away from their eggs', () => {
+    const plan = plans.get(seeds[0]);
+    const w = plan.fault.windows[0];
+    const pos = new THREE.Vector3(w.x, w.y, w.z);
+    const game = fakeGame(plan, pos, 12);
+    const eco = new Ecosystem(game);
+    game.ecosystem = eco;
+    simulate(game, eco, 5);
+    const S = eco.sp.find((x) => x.s.niche === 'chasm_hawk') || eco.sp.find((x) => x.s.layerIndex >= 3 && x.s.behavior.nest && x.s.behavior.nest !== 'roost');
+    const rng = new RNG(9);
+    const nest = pos.clone().add(new THREE.Vector3(3, 0.5, 2));
+    const f = eco.spawn(S, { x: nest.x, y: nest.y, z: nest.z, mode: 'rest' }, { ...individualGenes(S.s, rng), sex: 'f' }, { age: S.s.behavior.reproduction.maturity * 2 });
+    f.home = { pos: nest.clone(), kind: 'nest' };
+    f.nestEggs = 2; f.eggT = 200;
+    const seen = {};
+    eco.on((t) => { seen[t] = (seen[t] || 0) + 1; });
+    let guarded = 0;
+    for (let t = 0; t < 12; t += 0.1) { game.gameTime += 0.1; eco.update(0.1); if (f.state === 'guard') guarded++; }
+    // the explorer backs off: the parent calms down
+    game.player.pos.add(new THREE.Vector3(60, 0, 0));
+    for (let t = 0; t < 10; t += 0.1) { game.gameTime += 0.1; eco.update(0.1); }
+    note(`${S.s.name}: guarded ${(guarded / 10).toFixed(1)} s, strikes ${seen['guard-strike'] || 0}, explorer hurt ${game.player.hurtCount || 0}× · after leaving: ${f.state}`);
+    assert(guarded > 10 && seen.guard, 'the parent did not defend its nest');
+    assert(f.state !== 'guard', 'the parent kept guarding after the explorer left');
+    assert(Number.isFinite(f.pos.x + f.pos.y + f.pos.z), 'the guardian position became invalid');
   });
 
   await test('breeding: offspring inherit from both parents and join the population', () => {

@@ -3,7 +3,11 @@
 // explorer state, discoveries, artifacts, map exploration, ecosystem
 // populations and statistics. Saves live in localStorage and can be exported
 // to / imported from JSON files.
-export const SAVE_VERSION = 1;
+//
+// Version 2 (v0.3.0) rebuilt the world below the Stone Plain and the
+// creatures, so version 1 saves cannot be restored: loading one begins the
+// same seed anew (see App.startGame).
+export const SAVE_VERSION = 2;
 const INDEX_KEY = 'descents.saves.v1';
 const SLOT_PREFIX = 'descents.save.v1.';
 
@@ -54,7 +58,7 @@ export const SaveStore = {
 
   async write(save) {
     const data = await pack(save);
-    const meta = { id: save.id, name: save.name, seedLabel: save.seedLabel, time: save.time, depth: save.summary.depth, layer: save.summary.layer, species: save.summary.species, artifacts: save.summary.artifacts, playTime: save.gameTime, auto: !!save.auto };
+    const meta = { id: save.id, version: save.version, name: save.name, seedLabel: save.seedLabel, time: save.time, depth: save.summary.depth, layer: save.summary.layer, species: save.summary.species, artifacts: save.summary.artifacts, playTime: save.gameTime, auto: !!save.auto };
     const tryWrite = () => { localStorage.setItem(SLOT_PREFIX + save.id, data); };
     try {
       tryWrite();
@@ -130,5 +134,8 @@ export function exportSave(save) {
 }
 
 export function validateSave(obj) {
-  return obj && typeof obj === 'object' && obj.version === SAVE_VERSION && obj.seed !== undefined && obj.player && typeof obj.player.x === 'number';
+  return obj && typeof obj === 'object' && (obj.version === SAVE_VERSION || isLegacySave(obj)) && obj.seed !== undefined && obj.player && typeof obj.player.x === 'number';
 }
+
+/** A save from an older version whose world no longer matches its seed. */
+export function isLegacySave(obj) { return !!obj && typeof obj.version === 'number' && obj.version < SAVE_VERSION; }

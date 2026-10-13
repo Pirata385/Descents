@@ -6,7 +6,8 @@
 //
 // Actions: flee, hunt, forage, scavenge, rest, sleep, roost (go home),
 // court, nest (tend eggs and young), follow (young after parents), flock,
-// mob (small fliers harass a predator), defend (drive off rivals),
+// mob (small fliers harass a predator), defend (drive off rivals), guard
+// (deep-layer parents dive at an explorer who comes too close to the nest),
 // investigate (approach the explorer), symbiosis (keep beside a host),
 // stalk/charge (large predators and the explorer), wander, idle.
 import { G } from './genome.js';
@@ -14,7 +15,7 @@ import { G } from './genome.js';
 export const ACTION_LABEL = {
   flee: 'fleeing', hunt: 'hunting', forage: 'feeding', scavenge: 'scavenging', rest: 'resting', sleep: 'sleeping', roost: 'going home',
   court: 'courting', nest: 'tending its nest', follow: 'following its parent', flock: 'with its group', mob: 'mobbing a predator',
-  defend: 'driving off a rival', investigate: 'watching you', symbiosis: 'beside its host', stalk: 'stalking you', charge: 'charging!',
+  defend: 'driving off a rival', guard: 'defending its nest!', investigate: 'watching you', symbiosis: 'beside its host', stalk: 'stalking you', charge: 'charging!',
   wander: 'wandering', idle: 'resting', eat: 'eating', display: 'displaying', glide: 'gliding',
 };
 
@@ -59,7 +60,7 @@ export function decide(a, eco) {
     // the explorer is large, loud and (in the deep) carries a light
     // a still, quiet observer is gradually tolerated (habituation)
     const fleeR = (8 + a.ph.stats.perception * 0.45) * (1.25 - bold) * (eco.lampOn && eco.dark ? 1.35 : 1) * (player.crouch ? 0.6 : 1) * (a.juvenile ? 1.3 : 1) * (1 - 0.65 * (a.habit || 0));
-    if (playerD < fleeR && !(a.state === 'investigate' && playerD > 4)) {
+    if (playerD < fleeR && !(a.state === 'investigate' && playerD > 4) && a.state !== 'guard') {
       const w = (1 - playerD / fleeR) * (1.2 - bold) * 1.4;
       if (w > threatW) { threatW = w; threat = eco.playerAgent; threatD = playerD; }
     }
@@ -136,6 +137,11 @@ export function decide(a, eco) {
       if (o.sp !== sp || o === a.mate || o.sex !== a.sex || o.juvenile || o.dead) continue;
       if (o.pos.distanceTo(a.home.pos) < 14 + c[G.territory] * 20) { add('defend', aggr * c[G.territory] * 1.4, { agent: o, kind: 'rival' }, 6); break; }
     }
+  }
+  // nest defence: in the deep layers, parents with eggs or fresh young drive the explorer off
+  if (player && sp.layerIndex >= 3 && B.nest && B.nest !== 'roost' && a.home && a.home.kind !== 'range' && !a.juvenile && (a.nestEggs > 0 || a.broodT > 0 || (a.mate && a.mate.nestEggs > 0))) {
+    const r = 7 + c[G.territory] * 9;
+    if (player.pos.distanceTo(a.home.pos) < r && !eco.playerSafe) add('guard', 1.1 + bold * 0.8 + aggr * 0.6, { agent: eco.playerAgent, kind: 'explorer', pos: a.home.pos, r }, 5);
   }
   // symbiosis
   if (sp.relations.symbiontOf !== null) {

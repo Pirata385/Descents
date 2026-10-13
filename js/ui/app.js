@@ -10,7 +10,7 @@ import { ArtifactSystem } from '../artifacts/artifacts.js';
 import { Discovery } from '../systems/discovery.js';
 import { MapData } from '../systems/mapdata.js';
 import { EnvironmentProbe } from '../systems/environment.js';
-import { SaveStore, captureSave, applySave, exportSave, validateSave } from '../systems/save.js';
+import { SaveStore, captureSave, applySave, exportSave, validateSave, isLegacySave } from '../systems/save.js';
 import { AudioEngine } from '../audio/audio.js';
 import { HUD } from './hud.js';
 import { TouchControls, detectTouch } from './touch.js';
@@ -45,7 +45,11 @@ const MOBILE_DEFAULTS = { ...QUALITY.low, antialias: false };
 
 const TIPS = [
   'The Abyss Eye sits at the centre of the world. Every route down begins at its rim.',
-  'Creatures of the first two layers ignore explorers. Below that, be careful.',
+  'Creatures of the first two layers ignore explorers. In the Great Fault, keep clear of nests.',
+  'There is no stair into the Great Fault: look for the swallets in the Stone Plain and follow the caves down.',
+  'Windows in the fault walls look out over the chasm. Swifts and falcons nest on the ledges around them.',
+  'No two creatures of a species are alike. Regional forms differ in build, crests and colour.',
+  'A PS4 controller works everywhere, menus and journal included. Press any button to connect it.',
   'Hold F to study a creature. Patience reveals what it eats and how it lives.',
   'The grappling arm reaches 60 metres. Reel in to climb, pay out to rappel.',
   'Artifacts rest where few would look: ruins, cave chambers, the tops of spires.',
@@ -252,7 +256,7 @@ export class App {
         <h2>Expeditions</h2>
         <div class="save-list">${list.map((m) => `
           <div class="save-item">
-            <div><b>${esc(m.name)}</b>${m.auto ? ' <span class="muted">(autosave)</span>' : ''}<br><span class="muted">${fmtDate(m.time)} · seed “${esc(m.seedLabel)}” · ${m.depth} m · ${LAYERS[m.layer]?.title || ''} · ${m.species} species · ${m.artifacts} artifacts</span></div>
+            <div><b>${esc(m.name)}</b>${m.auto ? ' <span class="muted">(autosave)</span>' : ''}${(m.version || 1) < 2 ? ' <span class="muted">(older version: begins anew)</span>' : ''}<br><span class="muted">${fmtDate(m.time)} · seed “${esc(m.seedLabel)}” · ${m.depth} m · ${LAYERS[m.layer]?.title || ''} · ${m.species} species · ${m.artifacts} artifacts</span></div>
             <div class="row"><button class="btn small" data-load="${esc(m.id)}">Load</button><button class="btn small" data-export="${esc(m.id)}">Export</button><button class="btn small danger" data-del="${esc(m.id)}">Delete</button></div>
           </div>`).join('') || '<p class="muted">No saved expeditions yet.</p>'}</div>
         <div class="row">
@@ -525,6 +529,14 @@ export class App {
 
   // ------------------------------------------------------------------ game
   async startGame({ seedLabel, save = null }) {
+    let legacy = false;
+    if (save && isLegacySave(save)) {
+      // the world below the plain and its creatures changed since this save:
+      // the same seed starts again from the rim
+      legacy = true;
+      seedLabel = save.seedLabel || String(save.seed);
+      save = null;
+    }
     this.showLoading();
     const game = this.game = new Game(this.canvas, this.settings, {
       onProgress: (stage, p) => this.setProgress(stage, p),
@@ -549,6 +561,7 @@ export class App {
     this.setState('resume');
     this.showClickToPlay(save ? 'Click to continue the descent' : 'Click to begin the descent');
     if (!save) this.introHints();
+    if (legacy) this.hud.notify('This expedition was saved by an older version. The Abyss has changed below the Stone Plain, so it begins anew.', 'info', 12);
     window.__ready = true;
   }
 

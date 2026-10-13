@@ -429,6 +429,7 @@ export class Ecosystem {
     a.thinkT -= dt;
     if (a.avoidT > 0) a.avoidT -= dt;
     if (a.fleeEvT > 0) a.fleeEvT -= dt;
+    if (a.broodT > 0) a.broodT -= dt;
     if (a.thinkT <= 0) {
       a.thinkT = 0.45 + Math.random() * 0.5;
       const prev = a.state;
@@ -469,6 +470,7 @@ export class Ecosystem {
       case 'court': this.emit('court', { a, b: t.agent }); this.call(a, 'court'); break;
       case 'defend': this.emit('territorial', { a, b: t.agent }); this.call(a, 'threat'); break;
       case 'mob': this.emit('mob', { a, b: t.agent }); this.call(a, 'alarm'); break;
+      case 'guard': this.emit('guard', { a }); this.call(a, 'threat'); break;
       case 'symbiosis': this.emit('symbiosis', { a, host: t.agent }); break;
       case 'investigate': this.emit('investigate', { a }); break;
       case 'sleep': case 'roost': if (a.home && a.home.kind !== 'range' && !a.roostSeen && a.pos.distanceTo(a.home.pos) < 3) { a.roostSeen = true; this.emit('roost', { a, kind: a.home.kind }); } break;
@@ -603,6 +605,35 @@ export class Ecosystem {
         if (o.pos.distanceTo(a.pos) < 2 + a.scale) { o.needs.fear = 0.9; o.thinkT = 0; a.action = 'attack'; }
         break;
       }
+      case 'guard': {
+        // threat display, then dive passes (fliers) or lunges (climbers) until the explorer backs off
+        const p = this.playerAgent.pos;
+        const d = p.distanceTo(a.pos);
+        if (t.pos && p.distanceTo(t.pos) > t.r + 5) { a.timer = 0; break; }
+        a.lookAt = p;
+        a.guardT = (a.guardT || 0) - dt;
+        a.strikeCd = Math.max(0, (a.strikeCd || 0) - dt);
+        if (air || a.ph.stats.fly > 0) {
+          if (!air && d < 14) { a.mode = 'air'; a.vel.copy(a.up).multiplyScalar(3); }
+          // swoop in, then climb away and turn for another pass
+          if (a.guardT <= 0) { a.guardT = 2.6; a.swoop = !a.swoop; }
+          if (a.swoop) a.goal.set(p.x, p.y + 1.4, p.z);
+          else a.goal.set(p.x + Math.cos(a.id) * 9, p.y + 7, p.z + Math.sin(a.id) * 9);
+          hasGoal = true; speed = fly * (a.swoop ? 1.25 : 0.9); a.action = a.swoop ? 'attack' : 'call';
+        } else {
+          a.goal.copy(p); hasGoal = d > 1.6; speed = run * 0.85; a.action = d < 4 ? 'attack' : 'display';
+        }
+        if (d < 1.5 + a.scale * 0.5 && a.strikeCd <= 0 && this.player && this.player.mode !== 'dead') {
+          a.strikeCd = 2.5;
+          if (air) a.swoop = false;
+          // small birds only harass; raptors and the larger climbers draw blood
+          const dmg = Math.round(a.ph.scale * 4.5);
+          if (dmg > 0) this.player.hurt(dmg, 'creature');
+          this.emit('guard-strike', { a });
+          this.call(a, 'threat');
+        } else if (Math.random() < dt * 0.5) this.call(a, 'alarm');
+        break;
+      }
       case 'investigate': {
         const p = this.playerAgent.pos;
         const d = p.distanceTo(a.pos);
@@ -681,6 +712,8 @@ export class Ecosystem {
     if (a.nestEggs > 0 && a.eggT <= 0) {
       const n = a.nestEggs;
       a.nestEggs = 0;
+      a.broodT = 90;
+      if (a.mate && !a.mate.dead) a.mate.broodT = 90;
       const mate = a.mate && !a.mate.dead ? a.mate : a;
       for (let k = 0; k < n && this.agents.length < this.maxAgents + 6; k++) this.birth(a, mate, a.home.pos);
     }
