@@ -1,6 +1,6 @@
 // Samples the surroundings of the explorer a few times per second: nearby
-// still and running water, waterfalls, the city, and the drop beneath the
-// feet. Feeds the ambience mix.
+// still and running water, waterfalls, the city, the drop beneath the feet
+// and how open the Great Fault is around them. Feeds the ambience mix.
 import { clamp } from '../core/mathutil.js';
 import { Z_CITY, Z_COUNTRY } from '../world/field.js';
 
@@ -8,7 +8,7 @@ export class EnvironmentProbe {
   constructor(game) {
     this.game = game;
     this.timer = 0;
-    this.state = { water: 0, river: 0, fall: 0, city: 0, altitude: 0 };
+    this.state = { water: 0, river: 0, fall: 0, city: 0, altitude: 0, chasm: 0 };
     this.target = { ...this.state };
     this.falls = (game.plan.waterfalls || []).map((w) => ({ x: w.x, z: w.z, y0: w.bottomY, y1: w.topY, w: w.width || 3 }));
   }
@@ -56,5 +56,8 @@ export class EnvironmentProbe {
     T.city = info && pos.y > -30 ? (info.zone === Z_CITY ? 1 : info.zone === Z_COUNTRY ? 0.3 : 0) : 0;
     const fl = W.floorBelow(pos.x, pos.y + 0.5, pos.z);
     T.altitude = fl === -Infinity ? 200 : clamp(pos.y - fl, 0, 200);
+    // inside the chasm (negative clearance) or on a ledge looking into it
+    const C = W.gen && W.gen.chasm;
+    T.chasm = C ? clamp(1 - C.clearance(pos.x, pos.y, pos.z) / 22, 0, 1) : 0;
   }
 }

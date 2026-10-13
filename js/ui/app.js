@@ -20,14 +20,28 @@ import { FAMILY_LABEL } from '../creatures/genome.js';
 import { GamepadInput, GLYPH } from '../core/gamepad.js';
 
 const SETTINGS_KEY = 'descents.settings.v1';
+// graphics presets; changing any of these values by hand makes the preset 'custom'
+const QUALITY = {
+  low: { viewDistance: 0.55, pixelRatio: 0.75, shadows: false, shadowSize: 1024, particles: 0.35, creatures: 32 },
+  medium: { viewDistance: 0.8, pixelRatio: 1, shadows: true, shadowSize: 1024, particles: 0.6, creatures: 48 },
+  high: { viewDistance: 1.0, pixelRatio: 1.5, shadows: true, shadowSize: 2048, particles: 1, creatures: 60 },
+  ultra: { viewDistance: 1.4, pixelRatio: 2, shadows: true, shadowSize: 4096, particles: 1, creatures: 84 },
+};
+const QUALITY_KEYS = ['viewDistance', 'pixelRatio', 'shadows', 'particles', 'creatures'];
+function presetOf(s) {
+  for (const [name, q] of Object.entries(QUALITY)) if (QUALITY_KEYS.every((k) => s[k] === q[k])) return name;
+  return 'custom';
+}
+
 const DEFAULT_SETTINGS = {
+  quality: 'high', shadowSize: 2048, creatures: 60,
   viewDistance: 1.0, shadows: true, fov: 75, sensitivity: 1, invertY: false, pixelRatio: 1.5, particles: 1,
   volMaster: 0.8, volMusic: 0.5, volAmbience: 0.7, volEffects: 0.8, showArm: true, showFps: false, autoQuality: true,
   touchControls: 'auto', touchLook: 1, touchSize: 1, touchOpacity: 0.85,
   padLook: 1, padDeadzone: 0.15, rumble: true,
 };
 // lighter defaults the first time the game runs on a phone or tablet
-const MOBILE_DEFAULTS = { viewDistance: 0.6, pixelRatio: 1, shadows: false, particles: 0.5, antialias: false };
+const MOBILE_DEFAULTS = { ...QUALITY.low, antialias: false };
 
 const TIPS = [
   'The Abyss Eye sits at the centre of the world. Every route down begins at its rim.',
@@ -101,6 +115,8 @@ export class App {
     this.settings = loadSettings();
     this.touch = detectTouch(this.settings);
     if (this.touch && fresh) Object.assign(this.settings, MOBILE_DEFAULTS);
+    this.settings.quality = presetOf(this.settings);
+    this.dynScale = 1;
     document.body.classList.toggle('touch', this.touch);
     this.audio = new AudioEngine(this.settings);
     this.state = 'title';
@@ -110,13 +126,15 @@ export class App {
     this.ui.appendChild(this.screen);
     window.addEventListener('keydown', (e) => { this.setInputDevice(this.touch ? 'touch' : 'kbm'); this.onKey(e); });
     // whichever device was used last decides the prompts and the touch buttons
-    window.addEventListener('mousedown', () => this.setInputDevice('kbm'));
+    // (mouse events that browsers emulate after a tap do not count as the mouse)
+    const realMouse = (e) => !(e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) && performance.now() - (this.touchT || -1e9) > 1000;
+    window.addEventListener('mousedown', (e) => { if (realMouse(e)) this.setInputDevice('kbm'); });
     window.addEventListener('mousemove', (e) => {
       // ignore the jump some browsers report as the pointer locks
       const m = Math.abs(e.movementX || 0) + Math.abs(e.movementY || 0);
-      if (m > 4 && m < 250 && !(this.game && performance.now() - this.game.input.lockTime < 400)) this.setInputDevice('kbm');
+      if (m > 4 && m < 250 && realMouse(e) && !(this.game && performance.now() - this.game.input.lockTime < 400)) this.setInputDevice('kbm');
     });
-    window.addEventListener('touchstart', () => this.setInputDevice('touch'), { passive: true });
+    window.addEventListener('touchstart', () => { this.touchT = performance.now(); this.setInputDevice('touch'); }, { passive: true, capture: true });
     this.device = this.touch ? 'touch' : 'kbm';
     this.pad = new GamepadInput(this);
     // after playing with a controller (no pointer lock), a click takes the mouse back
@@ -141,7 +159,17 @@ export class App {
     document.body.classList.toggle('gamepad', dev === 'pad');
     if (this.game) this.game.pad = dev === 'pad';
     if (this.touchUI) this.touchUI.setVisible(this.touch && dev !== 'pad' && this.state === 'playing');
-    if (this.state === 'resume') this.showClickToPlay(this.clickText);
+    if (this.state === 'resume') {
+      // only the wording changes: rebuilding the screen mid-click would swallow the click
+      const m = this.screen.querySelector('.click-msg');
+      if (m) m.textContent = this.clickWording(this.clickText);
+    }
+  }
+
+  clickWording(text = 'Click to continue the descent') {
+    if (this.device === 'pad') return text.replace(/^Click/, 'Press ✕');
+    if (this.touch) return text.replace(/^Click/, 'Tap');
+    return text;
   }
 
   /** Options on the controller, or the controller was disconnected mid-play. */
@@ -269,11 +297,13 @@ export class App {
       <div class="panel settings">
         <h2>Settings</h2>
         <h3>Graphics</h3>
-        ${slider('viewDistance', 'View distance', 0.5, 1.6, 0.1, (v) => `${Math.round(v * 100)}%`)}
+        <div class="set-row"><label>Quality</label><select data-key="quality">${[['low', 'Low (phones, older laptops)'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra'], ['custom', 'Custom']].map(([v, l]) => `<option value="${v}" ${s.quality === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span class="val"></span></div>
+        ${slider('viewDistance', 'View distance', 0.5, 1.6, 0.05, (v) => `${Math.round(v * 100)}%`)}
         ${slider('pixelRatio', 'Resolution scale', 0.5, 2, 0.25, (v) => `${v}×`)}
-        ${slider('particles', 'Particles', 0, 1, 0.25, (v) => `${Math.round(v * 100)}%`)}
+        ${slider('particles', 'Particles', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`)}
+        ${slider('creatures', 'Creatures nearby', 16, 96, 4, (v) => `${v}`)}
         ${check('shadows', 'Shadows')}
-        ${check('autoQuality', 'Adapt view distance to keep the frame rate smooth')}
+        ${check('autoQuality', 'Adapt resolution and view distance to keep the frame rate smooth')}
         ${slider('fov', 'Field of view', 60, 100, 1, (v) => `${v}°`)}
         ${check('showArm', 'Show the grappling arm')}
         ${check('showFps', 'Show frame rate')}
@@ -305,13 +335,29 @@ export class App {
         s[key] = el.type === 'checkbox' ? el.checked : Number(el.value);
         if (valEl) {
           const v = s[key];
-          valEl.textContent = key === 'viewDistance' || key === 'particles' || key.startsWith('vol') || key === 'touchSize' || key === 'touchOpacity' ? `${Math.round(v * 100)}%` : key === 'fov' ? `${v}°` : key === 'pixelRatio' ? `${v}×` : Number(v).toFixed(2);
+          valEl.textContent = key === 'viewDistance' || key === 'particles' || key.startsWith('vol') || key === 'touchSize' || key === 'touchOpacity' ? `${Math.round(v * 100)}%` : key === 'fov' ? `${v}°` : key === 'pixelRatio' ? `${v}×` : key === 'creatures' ? `${v}` : Number(v).toFixed(2);
+        }
+        if (QUALITY_KEYS.includes(key)) {
+          s.quality = presetOf(s);
+          const q = this.screen.querySelector('select[data-key=quality]');
+          if (q) q.value = s.quality;
         }
         this.applySettings(key);
       };
     });
     this.screen.querySelectorAll('select[data-key]').forEach((el) => {
-      el.onchange = () => { s[el.dataset.key] = el.value; this.applySettings(el.dataset.key); };
+      el.onchange = () => {
+        const key = el.dataset.key;
+        s[key] = el.value;
+        if (key === 'quality' && QUALITY[el.value]) {
+          // a preset sets every graphics value at once
+          Object.assign(s, QUALITY[el.value]);
+          for (const k of [...QUALITY_KEYS, 'shadowSize']) this.applySettings(k);
+          this.showSettings(back);
+          return;
+        }
+        this.applySettings(key);
+      };
     });
     this.screen.querySelector('[data-act=defaults]').onclick = () => { Object.assign(s, DEFAULT_SETTINGS); for (const k of Object.keys(s)) this.applySettings(k); this.showSettings(back); };
     this.screen.querySelector('[data-act=back]').onclick = () => { saveSettings(s); back === 'pause' ? this.showPause() : this.showTitle(); };
@@ -326,7 +372,9 @@ export class App {
     if (!g || !g.renderer) return;
     if (key === 'viewDistance') g.chunks.setQuality(this.settings.viewDistance);
     if (key === 'shadows') g.renderer.setShadows(this.settings.shadows);
-    if (key === 'pixelRatio') g.renderer.setPixelRatio(this.settings.pixelRatio);
+    if (key === 'shadowSize') g.renderer.setShadowSize(this.settings.shadowSize);
+    if (key === 'pixelRatio') { this.dynScale = 1; g.renderer.setPixelRatio(this.settings.pixelRatio); }
+    if (key === 'creatures' && g.ecosystem) g.ecosystem.maxAgents = this.settings.creatures;
   }
 
   showControls(back) {
@@ -394,8 +442,7 @@ export class App {
 
   showClickToPlay(text = 'Click to continue the descent') {
     this.clickText = text;
-    if (this.device === 'pad') text = text.replace(/^Click/, 'Press ✕');
-    else if (this.touch) text = text.replace(/^Click/, 'Tap');
+    text = this.clickWording(text);
     this.screen.className = 'screen click-screen';
     this.screen.innerHTML = `<div class="click-msg">${esc(text)}</div>`;
     this.screen.onclick = () => { this.screen.onclick = null; this.resume(); };
@@ -670,24 +717,44 @@ export class App {
     if (this.autosaveTimer <= 0) { this.autosaveTimer = 120; if (p.mode !== 'dead' && p.onGround) this.save(true); }
   }
 
-  /** Keep the frame rate playable on slower machines by trading view distance. */
+  /**
+   * Keep the frame rate playable on slower machines: first lower the
+   * rendering resolution (instant, no rebuild), then the view distance; give
+   * both back when there is headroom again.
+   */
   adaptQuality() {
     const now = performance.now();
     const ms = this.lastFrameT ? now - this.lastFrameT : 16;
     this.lastFrameT = now;
     if (ms > 250) return; // a hitch (tab switch, loading), not a trend
-    this.frameEma = (this.frameEma ?? 16) * 0.97 + ms * 0.03;
+    this.frameEma = (this.frameEma ?? 16) * 0.95 + ms * 0.05;
     const s = this.settings, g = this.game;
     if (!s.autoQuality || this.state !== 'playing') return;
     this.qualityT = (this.qualityT || 0) + ms / 1000;
-    if (this.qualityT < 4) return;
+    if (this.qualityT < 1.5) return;
     this.qualityT = 0;
+    // phones aim for a steady 30+, computers for 50+
+    const target = this.touch ? 30 : 20;
     const cur = g.chunks.quality ?? s.viewDistance;
-    if (this.frameEma > 40 && cur > 0.55) {
-      g.chunks.setQuality(Math.max(0.5, cur - 0.1));
-      if (!this.qualityNoted) { this.qualityNoted = true; this.hud.notify('Lowering view distance to keep the frame rate smooth (see Settings).', 'info', 6); }
-    } else if (this.frameEma < 18 && cur < s.viewDistance - 0.01) {
-      g.chunks.setQuality(Math.min(s.viewDistance, cur + 0.1));
+    const setRes = (k) => {
+      if (Math.abs(k - this.dynScale) < 0.02) return;
+      this.dynScale = k;
+      g.renderer.setPixelRatio(s.pixelRatio * k);
+    };
+    if (this.frameEma > target * 1.2) {
+      this.slowT = (this.slowT || 0) + 1;
+      this.fastT = 0;
+      if (this.dynScale > 0.62) setRes(Math.max(0.6, this.dynScale * 0.88));
+      else if (this.slowT > 2 && cur > 0.55) {
+        this.slowT = 0;
+        g.chunks.setQuality(Math.max(0.5, cur - 0.1));
+        if (!this.qualityNoted) { this.qualityNoted = true; this.hud.notify('Lowering view distance to keep the frame rate smooth (see Settings).', 'info', 6); }
+      }
+    } else if (this.frameEma < target * 0.8) {
+      this.slowT = 0;
+      this.fastT = (this.fastT || 0) + 1;
+      if (cur < s.viewDistance - 0.01) { if (this.fastT > 2) { this.fastT = 0; g.chunks.setQuality(Math.min(s.viewDistance, cur + 0.1)); } }
+      else if (this.dynScale < 1) setRes(Math.min(1, this.dynScale * 1.06));
     }
   }
 
@@ -697,7 +764,7 @@ export class App {
     const e = g.envProbe.state, info = g.layerInfo || { layer: 0 };
     this.audio.update(dt, {
       pos: g.player.pos, layer: info.layer, zone: info.zone, enclosed: g.envEnclosed || 0, altitude: e.altitude,
-      water: e.water, river: e.river, fall: e.fall, city: e.city, night: g.renderer.night > 0.5,
+      water: e.water, river: e.river, fall: e.fall, city: e.city, chasm: e.chasm, night: g.renderer.night > 0.5,
       reeling: g.grapple.attached && g.grapple.reeling, paying: g.grapple.attached && g.grapple.paying,
     }, g.camera);
   }

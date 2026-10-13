@@ -59,6 +59,7 @@ export class Chasm {
   /** field: TerrainField (shares its warp noise and fault mouth table). */
   constructor(params, field) {
     const c = params.chasm, f = params.fault;
+    this.cacheCap = 400000;   // wall distance cache entries (planning); the running game lowers it
     this.c = c;
     this.f = f;
     this.cx0 = f.x; this.cz0 = f.z;
@@ -353,7 +354,7 @@ export class Chasm {
     let v = cache.get(key);
     if (v === undefined) {
       v = this._wallDist((pi / 650) - Math.PI, yi);
-      if (cache.size > 400000) cache.clear();
+      if (cache.size > this.cacheCap) cache.clear();
       cache.set(key, v);
     }
     return v;

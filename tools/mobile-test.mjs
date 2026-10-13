@@ -184,6 +184,7 @@ const ob = await center('.t-observe');
 await touch('touchStart', [[ob[0], ob[1], 6]]);
 await wait(1200);
 const zoomed = await page.evaluate(() => window.__descents.player.zoomed);
+console.log('      observe state', await page.evaluate(() => JSON.stringify({ mode: window.__descents.player.mode, is: window.__descents.input.is('observe'), ui: window.__descents.uiBlocking, st: window.__app.state, dev: window.__app.device })));
 await shot('m07-observe');
 await touch('touchEnd', []);
 check('holding Observe zooms in', zoomed === true);

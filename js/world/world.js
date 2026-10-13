@@ -18,6 +18,7 @@ export class World {
     this.plan = plan;
     this.params = plan.params;
     this.gen = new ColumnGen(plan);
+    this.gen.chasm.cacheCap = 50000;
     this.field = this.gen.field;
     this.cache = new Map();
     this.l0 = new Map();     // "cq:cr" -> spans data

@@ -31,7 +31,7 @@ const VIS_R = 150;          // render distance
 const POOL = 6;             // genomes kept per species and region
 
 const UP = new THREE.Vector3(0, 1, 0);
-const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _m = new THREE.Matrix4(), _q = new THREE.Quaternion();
+const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _lv = new THREE.Vector3(), _m = new THREE.Matrix4(), _q = new THREE.Quaternion();
 
 export class Ecosystem {
   constructor(game, opts = {}) {
@@ -84,13 +84,16 @@ export class Ecosystem {
     return `${band}:${i}:${j}:${slice}`;
   }
 
-  region(key, x, y, z, band) {
+  /** The region for a key, created on first use; null if creating it would overrun `deadline`. */
+  region(key, x, y, z, band, deadline = Infinity) {
     let r = this.regions.get(key);
+    if (r && r.init) return r;
+    if (performance.now() > deadline) return null;
     if (!r) {
       r = { key, band, x: (Math.floor(x / RS) + 0.5) * RS, y, z: (Math.floor(z / RS) + 0.5) * RS, pops: new Float32Array(this.species.length), K: new Float32Array(this.species.length), pools: [], init: false, active: false };
       this.regions.set(key, r);
     }
-    if (!r.init) this.initRegion(r);
+    this.initRegion(r);
     return r;
   }
 
@@ -278,17 +281,24 @@ export class Ecosystem {
     for (const r of this.regions.values()) r.active = false;
     const rr = Math.ceil(ACTIVE_R / RS);
     const ci = Math.floor(ppos.x / RS), cj = Math.floor(ppos.z / RS);
+    // nearest regions first; surveying new ground is spread over several passes
+    const cells = [];
     for (let dj = -rr; dj <= rr; dj++) for (let di = -rr; di <= rr; di++) {
       const x = (ci + di + 0.5) * RS, z = (cj + dj + 0.5) * RS;
-      if (Math.hypot(x - ppos.x, z - ppos.z) > ACTIVE_R + RS * 0.5) continue;
+      const d = Math.hypot(x - ppos.x, z - ppos.z);
+      if (d <= ACTIVE_R + RS * 0.5) cells.push([d, x, z]);
+    }
+    cells.sort((A, B) => A[0] - B[0]);
+    const deadline = performance.now() + 4;
+    for (const [, x, z] of cells) {
       for (const b of bands) {
         for (const dy of b === BAND.CAVE3 || b === BAND.CHASM ? [0, -160, 160] : [0]) {
           const y = ppos.y + dy;
           const key = this.regionKey(b, x, y, z);
           if (want.has(key)) continue;
           want.add(key);
-          const r = this.region(key, x, y, z, b);
-          r.active = true;
+          const r = this.region(key, x, y, z, b, deadline);
+          if (r) r.active = true;
         }
       }
     }
@@ -296,7 +306,7 @@ export class Ecosystem {
     const live = this.agents.filter((a) => !a.dead);
     for (const a of live) {
       const d = a.pos.distanceTo(ppos);
-      if (d > DROP_R || (Math.abs(a.pos.y - ppos.y) > 220)) this.despawn(a);
+      if (d > (a.mode === 'air' ? DROP_R + 60 : DROP_R) || (Math.abs(a.pos.y - ppos.y) > 220)) this.despawn(a);
     }
     // spawn: per active region, materialise its population (within the global budget)
     let count = this.agents.filter((a) => !a.dead).length;
@@ -360,8 +370,12 @@ export class Ecosystem {
     if (this.tickTimer <= 0) { this.tickTimer = 5; this.abstractTick(5); }
     this.activationTimer -= dt;
     if (this.activationTimer <= 0) { this.activationTimer = 1.0; this.updateActivation(player.pos); }
-    // build a couple of bodies per frame
-    for (let k = 0; k < 2 && this.buildQueue.length; k++) this.build(this.buildQueue.shift());
+    // build bodies within a small time budget per frame (at least one)
+    const bt = performance.now();
+    while (this.buildQueue.length) {
+      this.build(this.buildQueue.shift());
+      if (performance.now() - bt > 2.5) break;
+    }
     this.rebuildGrid();
     for (const at of this.attractors) at.t -= dt;
     this.attractors = this.attractors.filter((at) => at.t > 0);
@@ -369,17 +383,24 @@ export class Ecosystem {
     this.frame = (this.frame || 0) + 1;
     for (const a of this.agents) {
       if (a.dead) { a.deadT = (a.deadT || 0) + dt; if (a.obj) a.obj.root.visible = false; continue; }
-      this.live(a, dt);
+      // distant individuals think and move at a lower rate (simulation level of detail)
+      let d2 = a.pos.distanceToSquared(cam);
+      const every = d2 < 70 * 70 ? 1 : d2 < 130 * 130 ? 2 : 3;
+      a.liveDt = (a.liveDt || 0) + dt;
+      if (every === 1 || (this.frame + a.id) % every === 0) {
+        this.live(a, Math.min(0.25, a.liveDt));
+        a.liveDt = 0;
+        d2 = a.pos.distanceToSquared(cam);
+      }
       if (!a.obj) continue;
-      const d2 = a.pos.distanceToSquared(cam);
       a.visible = d2 < VIS_R * VIS_R;
       a.obj.root.visible = a.visible;
       if (!a.visible) continue;
       this.place(a);
       // animate near creatures every frame, far ones less often
-      const every = d2 < 40 * 40 ? 1 : d2 < 90 * 90 ? 2 : 4;
+      const anim = d2 < 40 * 40 ? 1 : d2 < 90 * 90 ? 2 : 4;
       a.animDt = (a.animDt || 0) + dt;
-      if ((this.frame + a.id) % every === 0) { this.animate(a, a.animDt); a.animDt = 0; }
+      if ((this.frame + a.id) % anim === 0) { this.animate(a, a.animDt); a.animDt = 0; }
     }
     for (const c of this.carcasses) c.time -= dt;
     this.carcasses = this.carcasses.filter((c) => c.time > 0 && c.meat > 0);
@@ -613,7 +634,11 @@ export class Ecosystem {
         if (!a.wanderPt || a.wanderPt.distanceTo(a.pos) < 1.5 || Math.random() < dt * 0.1) {
           a.wanderPt = a.wanderPt || new THREE.Vector3();
           const r = air ? 40 : 10 + a.scale * 6;
-          const base = a.home && a.home.kind !== 'range' && a.pos.distanceTo(a.home.pos) > 50 ? a.home.pos : a.pos;
+          let base = a.home && a.home.kind !== 'range' && a.pos.distanceTo(a.home.pos) > 50 ? a.home.pos : a.pos;
+          // the local population stays local: strays turn back toward the explorer's
+          // surroundings instead of drifting off and being folded back into the pool
+          const P = this.playerAgent.pos;
+          if (a.pos.distanceTo(P) > ACTIVE_R) base = _lv.lerpVectors(a.pos, P, 0.45);
           a.wanderPt.set(base.x + (Math.random() - 0.5) * 2 * r, base.y + (air ? (Math.random() - 0.5) * 20 : 0), base.z + (Math.random() - 0.5) * 2 * r);
           for (const at of this.attractors) if (at.pos.distanceTo(a.pos) < 35 && a.sp.behavior.diet !== 'carnivore') a.wanderPt.copy(at.pos);
           // keep away from where something frightened it

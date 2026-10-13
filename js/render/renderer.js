@@ -21,6 +21,9 @@ export class GameRenderer {
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = settings.shadows !== false;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // the shadow map is redrawn only when it can be seen (see update)
+    this.renderer.shadowMap.autoUpdate = false;
+    this.shadowFrame = 0;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(settings.fov || 75, 1, 0.08, 9000);
     this.scene.add(this.camera);
@@ -30,7 +33,8 @@ export class GameRenderer {
     this.sun.castShadow = settings.shadows !== false;
     const sc = this.sun.shadow.camera;
     sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70; sc.near = 1; sc.far = 600;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    const ss = settings.shadowSize || 2048;
+    this.sun.shadow.mapSize.set(ss, ss);
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.04;
     this.scene.add(this.sun);
@@ -276,6 +280,22 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     this.sun.position.copy(playerPos).addScaledVector(dir, 250);
     this.sun.target.position.copy(playerPos);
     this.sun.shadow.camera.updateProjectionMatrix();
+    // below the plain the sun no longer reaches the rock: stop redrawing the
+    // shadow map there (the deep layers are lit by glow, lamps and embers)
+    if (this.renderer.shadowMap.enabled) {
+      this.shadowFrame++;
+      const lit = ctx.y > -960 && e.sunI > 0.25;
+      const every = (this.settings.shadowSize || 2048) <= 1024 ? 2 : 1;
+      this.renderer.shadowMap.needsUpdate = lit && this.shadowFrame % every === 0;
+      if (!lit && this.shadowLit !== false) {
+        // one last pass with the shadow camera parked high above the world,
+        // so the map that stays behind shades nothing
+        this.sun.position.set(playerPos.x, 9000, playerPos.z);
+        this.sun.target.position.set(playerPos.x, 8990, playerPos.z);
+        this.renderer.shadowMap.needsUpdate = true;
+      }
+      this.shadowLit = lit;
+    }
     this.sky.update(this.camera.position, e);
     // light shafts face the camera around the vertical axis
     const shaftI = st.day * (1 - smoothstep(0.6, 1.0, ctx.enclosed));
@@ -309,6 +329,13 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     this.renderer.shadowMap.enabled = on;
     this.sun.castShadow = on;
     this.scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) m.needsUpdate = true; } });
+  }
+
+  setShadowSize(n) {
+    this.settings.shadowSize = n;
+    this.sun.shadow.mapSize.set(n, n);
+    if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
+    this.renderer.shadowMap.needsUpdate = true;
   }
 
   setPixelRatio(r) {
