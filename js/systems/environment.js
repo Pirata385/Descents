@@ -21,8 +21,11 @@ export class EnvironmentProbe {
       this.timer = 0.4;
       this.sample(p.pos);
     }
-    const k = Math.min(1, dt * 2);
-    for (const key of Object.keys(this.state)) this.state[key] += (this.target[key] - this.state[key]) * k;
+    const k = Math.min(1, Math.max(0, dt * 2));
+    for (const key of Object.keys(this.state)) {
+      const v = this.state[key] + (this.target[key] - this.state[key]) * k;
+      this.state[key] = Number.isFinite(v) ? v : (Number.isFinite(this.target[key]) ? this.target[key] : 0);
+    }
   }
 
   sample(pos) {

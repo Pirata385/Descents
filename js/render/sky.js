@@ -12,6 +12,7 @@ export class Sky {
       uHorizon: { value: new THREE.Color(0.7, 0.8, 0.9) },
       uSunColor: { value: new THREE.Color(1, 0.9, 0.7) },
       uDepthDim: { value: 1 },
+      uFogColor: shared.uFogColor,
     };
     const geo = new THREE.SphereGeometry(5000, 32, 16);
     const mat = new THREE.ShaderMaterial({
@@ -34,6 +35,7 @@ uniform vec3 uZenith;
 uniform vec3 uHorizon;
 uniform vec3 uSunColor;
 uniform float uDepthDim;
+uniform vec3 uFogColor;
 varying vec3 vDir;
 float sh(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 float sn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -66,7 +68,10 @@ void main() {
     cc += uSunColor * pow(sunDot, 4.0) * 0.4 * (1.0 - uNight);
     sky = mix(sky, cc, cov * smoothstep(0.02, 0.2, h) * 0.85);
   }
-  gl_FragColor = vec4(sky * uDepthDim, 1.0);
+  // the low sky takes the colour of the fog, so the end of the render distance
+  // melts into it instead of showing a band
+  sky = mix(sky * uDepthDim, uFogColor, (1.0 - smoothstep(-0.05, 0.22, h)) * 0.9);
+  gl_FragColor = vec4(sky, 1.0);
   #include <colorspace_fragment>
 }`,
     });
@@ -87,7 +92,7 @@ varying vec3 vWPos;
 void main() { vec4 wp = modelMatrix * vec4(position, 1.0); vWPos = wp.xyz; gl_Position = projectionMatrix * viewMatrix * wp; }`,
       fragmentShader: /* glsl */`
 uniform float uTime; uniform float uNight; uniform vec3 uSunDir; uniform vec3 uSunColor; uniform vec3 uSkyColor; uniform vec3 uCamPos;
-uniform vec3 uDeep; uniform vec3 uShallow; uniform vec3 uFogColor; uniform float uFogDensity;
+uniform vec3 uDeep; uniform vec3 uShallow; uniform vec3 uFogColor; uniform float uFogDensity; uniform float uFogEdge;
 varying vec3 vWPos;
 float oh(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 45758.5453); }
 float on(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -106,6 +111,7 @@ void main() {
   col *= 1.0 - uNight * 0.8;
   float dist = length(vWPos - uCamPos);
   float f = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist * 0.35);
+  f = max(f, smoothstep(uFogEdge * 0.6, uFogEdge * 0.97, dist));
   gl_FragColor = vec4(mix(col, uFogColor, clamp(f, 0.0, 1.0)), 1.0);
   #include <colorspace_fragment>
 }`,

@@ -3,6 +3,11 @@
 // 32 * 2^L cells and is meshed with 32x32 cells of size 2^L. Nodes near the
 // camera split into children. Workers build meshes; missing chunks are covered
 // by their nearest ready ancestor so the terrain never shows holes.
+//
+// Like Minecraft, only the chunks within the render distance (chosen in the
+// settings, in chunks of 32 cells) are built and drawn; nodes that cross that
+// circle are split down to small chunks so nothing coarse pokes out beyond it,
+// and the edge fog hides the border.
 import * as THREE from 'three';
 import { CHUNK } from '../world/mesher.js';
 import { makeTerrainMaterial, makeFoliageMaterial, makeWaterMaterial, makeFallMaterial } from './materials.js';
@@ -11,11 +16,12 @@ const LMAX = 5;
 const keyOf = (L, cq, cr) => `${L}:${cq}:${cr}`;
 
 export class ChunkManager {
-  constructor({ world, scene, workers, quality = 1.0, onChunkLoaded }) {
+  constructor({ world, scene, workers, quality = 1.0, renderChunks = 12, onChunkLoaded }) {
     this.world = world;
     this.scene = scene;
     this.workers = workers; // array of { worker, busy }
     this.quality = quality;
+    this.renderRadius = renderChunks * CHUNK;
     this.onChunkLoaded = onChunkLoaded;
     this.nodes = new Map();
     this.pending = new Map(); // key -> {L, cq, cr, prio}
@@ -57,7 +63,11 @@ export class ChunkManager {
       if (Math.abs(x) - rad > this.world.params.worldHalfX + 80 || Math.abs(z) - rad > this.world.params.worldHalfZ + 80) return;
       const d = Math.hypot(x - cx, z - cz);
       const S = CHUNK << L;
-      if (L > 0 && d - rad < K * S * 0.5) {
+      // beyond the render distance: not built, not drawn
+      if (d - rad > this.renderRadius) return;
+      // crossing the edge: split until the pieces are small
+      const edge = d + rad > this.renderRadius && L > 2;
+      if (L > 0 && (edge || d - rad < K * S * 0.5)) {
         for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) rec(L - 1, cq * 2 + i, cr * 2 + j);
       } else out.push({ L, cq, cr, d, S });
     };
@@ -237,6 +247,8 @@ export class ChunkManager {
   }
 
   setQuality(q) { this.quality = q; }
+
+  setRenderDistance(chunks) { this.renderRadius = chunks * CHUNK; }
 
   dispose() {
     for (const n of [...this.nodes.values()]) this.disposeNode(n);

@@ -27,7 +27,9 @@ export class GameRenderer {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(settings.fov || 75, 1, 0.08, 9000);
     this.scene.add(this.camera);
-    this.scene.fog = new THREE.FogExp2(0x9ab0c0, 0.0015);
+    // near = exponential density, far = render distance (see materials.js)
+    this.scene.fog = new THREE.Fog(0x9ab0c0, 0.0015, 400);
+    this.setRenderDistance(settings.renderChunks || 12);
 
     this.sun = new THREE.DirectionalLight(0xfff2dd, 2.4);
     this.sun.castShadow = settings.shadows !== false;
@@ -115,16 +117,17 @@ export class GameRenderer {
     this.shafts = new THREE.Group();
     const p = this.plan.params;
     const mat = new THREE.ShaderMaterial({
-      uniforms: { uTime: shared.uTime, uI: { value: 0.5 }, uCol: { value: new THREE.Color(1, 0.95, 0.8) } },
+      uniforms: { uTime: shared.uTime, uI: { value: 0.5 }, uCol: { value: new THREE.Color(1, 0.95, 0.8) }, uFogEdge: shared.uFogEdge, uCamPos: shared.uCamPos },
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
-      vertexShader: /* glsl */`varying vec2 vUv; varying float vY; void main(){ vUv = uv; vec4 wp = modelMatrix * vec4(position,1.0); vY = wp.y; gl_Position = projectionMatrix * viewMatrix * wp; }`,
-      fragmentShader: /* glsl */`uniform float uTime; uniform float uI; uniform vec3 uCol; varying vec2 vUv; varying float vY;
+      vertexShader: /* glsl */`varying vec2 vUv; varying float vY; varying vec3 vW; void main(){ vUv = uv; vec4 wp = modelMatrix * vec4(position,1.0); vY = wp.y; vW = wp.xyz; gl_Position = projectionMatrix * viewMatrix * wp; }`,
+      fragmentShader: /* glsl */`uniform float uTime; uniform float uI; uniform vec3 uCol; uniform float uFogEdge; uniform vec3 uCamPos; varying vec2 vUv; varying float vY; varying vec3 vW;
 float h(float n){return fract(sin(n)*43758.5453);}
 void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
   float fall = smoothstep(0.0,0.15,vUv.y)*(1.0-smoothstep(0.55,1.0,vUv.y));
   float flick = 0.75 + 0.25*sin(uTime*0.3 + vUv.x*6.0);
   float dust = 0.85 + 0.15*h(floor(vUv.y*80.0)+floor(vUv.x*20.0)*13.0);
-  gl_FragColor = vec4(uCol * edge * fall * flick * dust * uI * 0.12, 1.0); }`,
+  float far = 1.0 - smoothstep(uFogEdge * 0.5, uFogEdge * 0.95, length(vW - uCamPos));
+  gl_FragColor = vec4(uCol * edge * fall * flick * dust * uI * 0.12 * far, 1.0); }`,
     });
     this.shaftMat = mat;
     const rng = (i) => (Math.sin(i * 91.7 + p.seed % 1000) * 43758.5453) % 1;
@@ -149,7 +152,7 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     const p = this.plan.params;
     if (!p.chasm) return;
     const mat = this.shaftMat.clone();
-    mat.uniforms = { uTime: shared.uTime, uI: { value: 0.5 }, uCol: { value: new THREE.Color(1, 0.88, 0.7) } };
+    mat.uniforms = { uTime: shared.uTime, uI: { value: 0.5 }, uCol: { value: new THREE.Color(1, 0.88, 0.7) }, uFogEdge: shared.uFogEdge, uCamPos: shared.uCamPos };
     this.chasmShaftMat = mat;
     const n = 6;
     for (let i = 0; i < n; i++) {
@@ -221,13 +224,15 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     if (dusk > 0.05) t.sunColor.lerp(tmpC.setRGB(1, 0.6, 0.35), dusk * 0.6);
     t.sunI = 3.1 * day * lerp(1, 0.55, depthK) + 0.35 * night;
     if (ctx.layer >= 3) {
-      // the Great Fault changes with depth: ember reach, rust strata, lantern deeps, the basin
-      const u = smoothstep(-1150, -1350, ctx.y), d = smoothstep(-1550, -1750, ctx.y);
-      const ember = [0.18, 0.075, 0.045], rust = [0.16, 0.115, 0.07], deep = [0.05, 0.13, 0.135];
-      const g = [0, 1, 2].map((i) => lerp(lerp(ember[i], rust[i], u), deep[i], d));
-      t.glow.setRGB(g[0], g[1], g[2]);
-      const fe = [0.13, 0.09, 0.085], fr = [0.14, 0.11, 0.085], fd = [0.055, 0.1, 0.11];
-      t.fog.setRGB(...[0, 1, 2].map((i) => lerp(lerp(fe[i], fr[i], u), fd[i], d)));
+      // the Great Fault: daylight from the plain far above, scattered by haze between
+      // pale stone walls; a little cooler and dimmer with depth, darker inside the caves
+      const d = smoothstep(-1000, -1850, ctx.y);
+      const cave = ctx.enclosed;
+      const fill = lerp(0.52, 0.4, d) * (1 - cave * 0.45) * lerp(1, 0.55, night);
+      t.glow.setRGB(fill * 0.98, fill * 1.0, fill * 1.03);
+      t.fog.setRGB(lerp(0.66, 0.5, d), lerp(0.7, 0.56, d), lerp(0.75, 0.63, d)).multiplyScalar((1 - cave * 0.55) * lerp(1, 0.45, night));
+      t.hemiSky.setRGB(...v.ambient);
+      t.hemiI = 2.2;
       if (ctx.layer >= 4) { t.glow.setRGB(0.05, 0.13, 0.17); t.fog.setRGB(...v.fogColor); }
       t.fogDensity = v.fogDensity * (1 + ctx.enclosed * 0.6);
     } else {
@@ -239,7 +244,7 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     t.horizon.setRGB(0.7, 0.8, 0.9).lerp(tmpC.setRGB(0.95, 0.6, 0.45), dusk).lerp(tmpC.setRGB(0.05, 0.07, 0.12), night);
     t.sun.setRGB(1, 0.9, 0.7).lerp(tmpC.setRGB(1, 0.5, 0.3), dusk);
     t.skyDim = lerp(1, 0.75, depthK);
-    t.exposure = lerp(1.05, 1.35, depthK) + night * 0.25 * (1 - depthK) + (ctx.layer >= 3 ? 0.2 : 0);
+    t.exposure = lerp(1.05, 1.35, depthK) + night * 0.25 * (1 - depthK) + (ctx.layer === 3 ? 0.1 : ctx.layer >= 4 ? 0.2 : 0);
     return { sunElev, day, night };
   }
 
@@ -258,7 +263,8 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     e.exposure = lerp(e.exposure, t.exposure, k);
     // apply
     this.scene.fog.color.copy(e.fog);
-    this.scene.fog.density = e.fogDensity;
+    this.scene.fog.near = e.fogDensity;
+    this.scene.fog.far = this.fogEdge;
     shared.uFogColor.value.copy(e.fog);
     shared.uFogDensity.value = e.fogDensity;
     this.hemi.color.copy(e.hemiSky); this.hemi.groundColor.copy(e.hemiGround); this.hemi.intensity = e.hemiI;
@@ -281,7 +287,7 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     this.sun.target.position.copy(playerPos);
     this.sun.shadow.camera.updateProjectionMatrix();
     // below the plain the sun no longer reaches the rock: stop redrawing the
-    // shadow map there (the deep layers are lit by glow, lamps and embers)
+    // shadow map there (the deep layers are lit by scattered daylight, glow and lamps)
     if (this.renderer.shadowMap.enabled) {
       this.shadowFrame++;
       const lit = ctx.y > -960 && e.sunI > 0.25;
@@ -329,6 +335,13 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     this.renderer.shadowMap.enabled = on;
     this.sun.castShadow = on;
     this.scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) m.needsUpdate = true; } });
+  }
+
+  /** Render distance in chunks (32 m each): the edge fog closes in at that radius. */
+  setRenderDistance(chunks) {
+    this.fogEdge = chunks * 32;
+    shared.uFogEdge.value = this.fogEdge;
+    if (this.scene.fog) this.scene.fog.far = this.fogEdge;
   }
 
   setShadowSize(n) {

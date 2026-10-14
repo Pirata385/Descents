@@ -46,12 +46,13 @@ export function makeParams(seed) {
     galleries.push({ yTop: g2Top, height: g2H, depthMin: 25, depthMax: rng.range(70, 95), open: rng.range(-0.05, 0.1), seed: rng.int(1, 1e9), forest: 0.5 });
   }
 
+  // the Great Fault: a wide tube sunk into the Stone Plain
   const faultAngle = rng.range(0, Math.PI * 2);
-  const faultR = rng.range(62, 84);
-  const faultDist = rng.range(0.22, 0.42) * eyeR;
+  const faultR = rng.range(118, 136);
+  const faultDist = rng.range(0.1, 0.28) * eyeR;
 
   // Layer 3: the Great Fault chasm below the plain (its own stream)
-  const chasm = makeChasmParams(seed, plainY);
+  const chasm = makeChasmParams(seed, plainY, faultR);
 
   // Palette
   const grassHue = rng.range(0.22, 0.33);
@@ -89,7 +90,7 @@ export function makeParams(seed) {
 
   return {
     seed,
-    version: 2,
+    version: 3,
     worldHalfX: WORLD_HALF_X,
     worldHalfZ: WORLD_HALF_Z,
     bottomY: BOTTOM_Y,

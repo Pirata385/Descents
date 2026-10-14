@@ -169,7 +169,8 @@ function layerPalette(layerId, niche, rng) {
     case 'layer2': return rng.weighted([[{ hue: [0.42, 0.62], sat: [0.18, 0.5], light: [0.26, 0.48] }, 3], [{ hue: [0.68, 0.84], sat: [0.18, 0.45], light: [0.25, 0.45] }, 2], [grey, 1], [vivid, 1]]);
     case 'layer3': return NICHES[niche].habitat === 'cave'
       ? { hue: [0.02, 0.14], sat: [0.05, 0.35], light: [0.45, 0.76] }   // pale, depigmented cave forms
-      : rng.weighted([[{ hue: [0.94, 1.1], sat: [0.3, 0.65], light: [0.2, 0.42] }, 3], [{ hue: [0.02, 0.1], sat: [0.15, 0.45], light: [0.18, 0.38] }, 2], [grey, 1]]); // ember and soot tones
+      // the open tube: pale greys and whites against the limestone, slate blue, soft browns, a few crimson species
+      : rng.weighted([[{ hue: [0, 1], sat: [0.02, 0.1], light: [0.45, 0.78] }, 3], [{ hue: [0.55, 0.65], sat: [0.12, 0.3], light: [0.35, 0.6] }, 2], [{ hue: [0.05, 0.12], sat: [0.18, 0.4], light: [0.3, 0.55] }, 2], [{ hue: [0.96, 1.02], sat: [0.45, 0.7], light: [0.3, 0.45] }, 1]]);
     default: return vivid;
   }
 }
@@ -525,7 +526,7 @@ export const DIET_TEXT = {
   grazer: 'Grazes on grasses and low plants', browser: 'Browses shrubs and foliage', carnivore: 'Hunts other creatures',
   insectivore: 'Feeds on small arthropods', scavenger: 'Scavenges carcasses', piscivore: 'Catches fish in open water',
   nectar: 'Drinks nectar from flowers', detritivore: 'Feeds on decaying matter', lithophage: 'Grinds and eats minerals and lichen',
-  omnivore: 'Eats almost anything it can find', lichen: 'Grazes glowing lichen from the rock',
+  omnivore: 'Eats almost anything it can find', lichen: 'Grazes moss and lichen from the rock',
 };
 
 export const LOCO_TEXT = {

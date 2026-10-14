@@ -210,6 +210,46 @@ export async function creatureTests(seeds, plans) {
     for (const a of live) assert(Number.isFinite(a.pos.x + a.pos.y + a.pos.z), 'a creature position became invalid');
   });
 
+  await test('creatures keep appearing around a travelling explorer and leave when it moves on', () => {
+    const plan = plans.get(seeds[0]);
+    const route = [];
+    for (const n of ["Delvers' Road", 'The Great Spiral']) {
+      const r = plan.routes.find((x) => x.name === n);
+      if (r) for (let i = 0; i < r.pts.length; i += 3) route.push(new THREE.Vector3(r.pts[i], r.pts[i + 1], r.pts[i + 2]));
+    }
+    assert(route.length > 10, 'routes to walk');
+    const game = fakeGame(plan, route[0].clone());
+    game.renderer.fogEdge = 12 * 32;
+    const eco = new Ecosystem(game);
+    game.ecosystem = eco;
+    const P = game.player.pos;
+    let i = 0, t = 0, checks = 0, populated = 0, far = 0;
+    const layersSeen = new Set();
+    while (i < route.length - 1 && t < 900) {
+      let step = 6 * 0.1;
+      while (step > 0 && i < route.length - 1) {
+        const d = P.distanceTo(route[i + 1]);
+        if (d <= step) { P.copy(route[i + 1]); i++; step -= d; } else { P.addScaledVector(route[i + 1].clone().sub(P).normalize(), step); step = 0; }
+      }
+      game.camera.position.copy(P).y += 1.6;
+      game.gameTime += 0.1; t += 0.1;
+      eco.update(0.1);
+      if (t > 20 && Math.round(t * 10) % 150 === 0) {
+        const live = eco.agents.filter((a) => !a.dead);
+        const near = live.filter((a) => a.pos.distanceTo(P) < 130);
+        checks++;
+        if (near.length >= 8) populated++;
+        for (const a of near) layersSeen.add(a.sp.layer);
+        far += live.filter((a) => a.pos.distanceTo(P) > eco.areaRadius() + 120).length;
+      }
+    }
+    note(`${checks} checks along ${Math.round(t)} s of walking: ${populated} with 8+ creatures nearby · spawned ${eco.stats.spawned}, folded back ${eco.stats.despawned} · layers ${[...layersSeen].join(', ')}`);
+    assert(populated >= checks * 0.85, `creatures thinned out while travelling (${populated}/${checks})`);
+    assert(eco.stats.despawned > 20, 'creatures left behind were not folded back into the population');
+    assert(far === 0, `${far} creatures lingered far outside the explorer's area`);
+    assert(layersSeen.has('layer1') && layersSeen.has('layer2'), 'the fauna should change from Layer 1 to Layer 2 on the way down');
+  });
+
   await test('ecosystem: abstract populations keep evolving away from the explorer', () => {
     const plan = plans.get(seeds[0]);
     const game = fakeGame(plan, new THREE.Vector3(0, 0, 0));

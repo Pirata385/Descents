@@ -360,7 +360,7 @@ export class ColumnGen {
         let bot = iv[k * 2 + 1];
         const basin = bot < c.floorY + 12;
         if (basin) bot += fbm2(f.nPlain, x / 26 + 40, z / 26, 3) * 1.8 + Math.max(0, ridged2(f.nPlain, x / 18, z / 18 - 30, 2) - 0.7) * 9;
-        // floors: ember gravel high up, lichen-carpeted ledges lower down, pale stone in the basin
+        // floors: granite and gravel high up, moss-carpeted limestone ledges lower down, pale stone in the basin
         const v = f.nPlain.noise2(x / 23 + 7, z / 23 - 3) + (bot < -1200 ? 0.35 : -0.25) + (bot < -1650 ? 0.3 : 0);
         const floorMat = basin ? (v > 0.75 ? M.LICHEN : M.DEEPSTONE) : bot > -1150 ? (v > 0.2 ? M.BASALT : M.GRAVEL) : v > 0.55 ? M.LICHEN : M.FAULTROCK;
         const ceilMat = top > c.yThroat - 6 ? M.BASALT : M.FAULTROCK;
@@ -373,7 +373,7 @@ export class ColumnGen {
       for (let i = 0; i < col.n; i++) if (col.y1[i] < this.plainY - 3 && col.side[i] === M.ROCK) col.side[i] = M.FAULTROCK;
     }
     if (r < P.Re && col.n && col.y1[col.n - 1] > this.plainY - 12) {
-      // basalt rim around the plain hole
+      // a granite rim around the mouth of the tube
       const FP = f.faultPolar(x, z, this.FP);
       if (FP.fr > FP.Rf - 1 && FP.fr < FP.Rf + 14) col.top[col.n - 1] = M.BASALT;
     }

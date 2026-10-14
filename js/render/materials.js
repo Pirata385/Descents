@@ -5,6 +5,23 @@
 // Water and waterfalls use custom shaders with matching fog.
 import * as THREE from 'three';
 
+// Fog for every material. The atmosphere's exponential fog is combined with an
+// edge fog that reaches full strength at the render distance, so the end of the
+// loaded world dissolves instead of showing a hard border. Distances are radial
+// (from the eye), so the edge is a circle and does not swing as the view turns.
+// three's own materials get it by patching their fog chunks; the scene uses a
+// THREE.Fog whose `near` carries the exponential density and `far` the edge.
+THREE.ShaderChunk.fog_vertex = /* glsl */`
+#ifdef USE_FOG
+  vFogDepth = length( mvPosition.xyz );
+#endif`;
+THREE.ShaderChunk.fog_fragment = /* glsl */`
+#ifdef USE_FOG
+  float fogFactor = 1.0 - exp( - fogNear * fogNear * vFogDepth * vFogDepth );
+  fogFactor = max( fogFactor, smoothstep( fogFar * 0.6, fogFar * 0.97, vFogDepth ) );
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, clamp( fogFactor, 0.0, 1.0 ) );
+#endif`;
+
 export const shared = {
   uTime: { value: 0 },
   uNight: { value: 0 },          // 0 day .. 1 night
@@ -16,6 +33,7 @@ export const shared = {
   uSkyColor: { value: new THREE.Color(0.6, 0.75, 0.9) },
   uFogColor: { value: new THREE.Color(0.6, 0.7, 0.8) },
   uFogDensity: { value: 0.0015 },
+  uFogEdge: { value: 400 },      // render distance in metres: the world fades out by here
   uCamPos: { value: new THREE.Vector3() },
   uLampPos: { value: new THREE.Vector3() },
   uLampColor: { value: new THREE.Color(0, 0, 0) },
@@ -85,9 +103,18 @@ ${COMMON_PARS}`)
   if (abs(flag - 5.0) < 0.5) {
     float band = floor(vWPos.y / 2.6);
     float hb = dHash(band * 1.37);
-    diffuseColor.rgb *= 0.84 + 0.3 * hb;
-    diffuseColor.rgb += vec3(0.035, 0.015, -0.012) * (dHash(band + 17.0) - 0.5);
-    diffuseColor.rgb *= 0.92 + 0.16 * dNoise(vWPos * vec3(0.35, 1.6, 0.35));
+    if (vWPos.y < -870.0) {
+      // the Great Fault: pale limestone beds, granite speckle lower down
+      float bed = floor(vWPos.y / 1.7 + dNoise(vWPos * vec3(0.02, 0.0, 0.02)) * 2.0);
+      diffuseColor.rgb *= 0.9 + 0.14 * dHash(bed * 1.91);
+      float speck = smoothstep(0.72, 0.8, dNoise(vWPos * 2.3)) * smoothstep(-1150.0, -1300.0, vWPos.y);
+      diffuseColor.rgb *= 1.0 - 0.18 * speck;
+      diffuseColor.rgb *= 0.95 + 0.1 * dNoise(vWPos * vec3(0.3, 1.2, 0.3));
+    } else {
+      diffuseColor.rgb *= 0.84 + 0.3 * hb;
+      diffuseColor.rgb += vec3(0.035, 0.015, -0.012) * (dHash(band + 17.0) - 0.5);
+      diffuseColor.rgb *= 0.92 + 0.16 * dNoise(vWPos * vec3(0.35, 1.6, 0.35));
+    }
   }
   float camDist = length(vWPos - uCamPos);
   if (vNy > 0.5) {
@@ -134,30 +161,6 @@ ${COMMON_PARS}`)
       totalEmissiveRadiance += vec3(1.0, 0.32, 0.08) * vein * (1.6 + 0.6 * sin(uTime * 0.8 + vWPos.y * 0.2));
     } else if (abs(flag - 3.0) < 0.5) totalEmissiveRadiance += diffuseColor.rgb * (0.5 + 0.25 * sin(uTime * 1.3 + vWPos.x)) * (0.4 + emi);
     else if (abs(flag - 4.0) < 0.5) totalEmissiveRadiance += vec3(0.25, 0.9, 0.8) * 0.35 * smoothstep(0.6, 0.9, dNoise(vWPos * 2.0));
-    else if (abs(flag - 5.0) < 0.5 && vWPos.y < -880.0) {
-      // the Great Fault: ember veins in the upper walls, glowing lichen lower down
-      float up = smoothstep(-880.0, -950.0, vWPos.y) * (1.0 - smoothstep(-1150.0, -1290.0, vWPos.y));
-      if (up > 0.01) {
-        float v = dNoise(vWPos * vec3(0.16, 0.45, 0.16)) * 0.6 + dNoise(vWPos * 0.5) * 0.4;
-        float vein = smoothstep(0.665, 0.69, v) * (1.0 - smoothstep(0.69, 0.715, v));
-        float seam = smoothstep(0.58, 0.78, dNoise(vWPos * vec3(0.012, 0.03, 0.012) + 7.0));
-        totalEmissiveRadiance += vec3(1.0, 0.33, 0.09) * vein * seam * up * (0.9 + 0.35 * sin(uTime * 0.6 + vWPos.y * 0.13));
-      }
-      float lo = smoothstep(-1120.0, -1320.0, vWPos.y);
-      if (lo > 0.01) {
-        float patchy = smoothstep(0.38, 0.72, dNoise(vWPos * 0.085 + 3.0));
-        float dots = smoothstep(0.8, 0.9, dNoise(vWPos * 1.9)) * patchy;
-        vec3 lc = mix(vec3(1.0, 0.72, 0.3), vec3(0.25, 1.0, 0.85), smoothstep(-1450.0, -1750.0, vWPos.y));
-        totalEmissiveRadiance += lc * dots * lo * (0.55 + 0.25 * sin(uTime * 0.8 + vWPos.x * 0.21 + vWPos.z * 0.17));
-      }
-    }
-    else if (abs(flag - 6.0) < 0.5) {
-      // glow lichen carpets: soft patches with brighter specks, warm above, cold below
-      float patchy = smoothstep(0.45, 0.8, dNoise(vWPos * 0.22));
-      float specks = smoothstep(0.78, 0.9, dNoise(vWPos * 3.1));
-      vec3 lc = mix(vec3(0.95, 0.75, 0.35), vec3(0.3, 1.0, 0.85), smoothstep(-1300.0, -1700.0, vWPos.y));
-      totalEmissiveRadiance += lc * (0.025 * patchy + 0.45 * specks * patchy) * (0.8 + 0.2 * sin(uTime * 0.7 + vWPos.x * 0.5));
-    }
     else if (emi > 0.01) totalEmissiveRadiance += diffuseColor.rgb * emi * 1.4;
   }`);
 }
@@ -193,8 +196,10 @@ export function makeFoliageMaterial() {
 export const FOG_GLSL = /* glsl */`
 uniform vec3 uFogColor;
 uniform float uFogDensity;
+uniform float uFogEdge;
 vec3 applyFog(vec3 c, float dist) {
   float f = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
+  f = max(f, smoothstep(uFogEdge * 0.6, uFogEdge * 0.97, dist));
   return mix(c, uFogColor, clamp(f, 0.0, 1.0));
 }`;
 
@@ -353,7 +358,9 @@ void main() {
   col *= mix(uDeepLight + 0.3, 1.0, depthK) * (1.0 - uNight * 0.65);
   float fade = 1.0 - smoothstep(0.75, 1.0, vUv.y);
   float a = edge * (0.35 + 0.45 * s) * fade * (0.6 + 0.4 * spread);
-  gl_FragColor = vec4(applyFog(col, length(vWPos - uCamPos) * 0.8), a);
+  float dist = length(vWPos - uCamPos);
+  // the great falls show through the haze a little, but never past the render distance
+  gl_FragColor = vec4(applyFog(col, dist * 0.8), a * (1.0 - smoothstep(uFogEdge * 0.6, uFogEdge * 0.97, dist)));
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`,

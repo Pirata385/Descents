@@ -2,7 +2,7 @@
 // - a field of motes that wraps around the camera (pollen and seed fluff on
 //   the surface, cave dust, drifting spores in the Inverted Forest, ash in the
 //   Great Fault) and a second additive field of glowing particles (fireflies
-//   at night, bioluminescent spores, rising embers),
+//   at night, bioluminescent spores, pale dust in the Great Fault),
 // - billowing mist at the foot of the great waterfalls.
 // Each environment preset is blended smoothly as the explorer descends.
 import * as THREE from 'three';
@@ -18,10 +18,11 @@ const PRESETS = {
   cave: { motes: [0.45, [0.75, 0.72, 0.65], [0.6, 0.58, 0.55], 0.05, -0.02, 0.1], glows: [0.04, [0.4, 0.9, 0.9], [0.5, 0.7, 1.0], 0.08, 0.02, 0.5] },
   forest: { motes: [0.55, [0.7, 0.95, 0.85], [0.85, 0.8, 1.0], 0.06, 0.12, 0.25], glows: [0.45, [0.3, 1.0, 0.85], [0.75, 0.45, 1.0], 0.1, 0.1, 0.6] },
   plain: { motes: [0.35, [0.95, 0.92, 0.85], [0.8, 0.85, 0.8], 0.06, 0.04, 0.35], glows: [0.18, [0.5, 1.0, 0.9], [1.0, 0.95, 0.6], 0.1, 0.06, 0.6] },
-  fault: { motes: [0.55, [0.45, 0.42, 0.42], [0.3, 0.28, 0.3], 0.07, -0.25, 0.3], glows: [0.6, [1.0, 0.45, 0.15], [1.0, 0.25, 0.08], 0.09, 0.9, 0.2] },
-  faultMid: { motes: [0.5, [0.62, 0.5, 0.4], [0.45, 0.38, 0.32], 0.06, -0.08, 0.3], glows: [0.35, [1.0, 0.75, 0.35], [0.95, 0.55, 0.25], 0.08, 0.15, 0.7] },
-  faultDeep: { motes: [0.45, [0.5, 0.58, 0.62], [0.4, 0.45, 0.5], 0.06, 0.03, 0.3], glows: [0.5, [0.3, 1.0, 0.85], [0.45, 0.7, 1.0], 0.08, 0.08, 0.8] },
-  faultCave: { motes: [0.4, [0.62, 0.56, 0.5], [0.5, 0.46, 0.44], 0.05, -0.02, 0.1], glows: [0.12, [0.95, 0.75, 0.4], [0.35, 1.0, 0.85], 0.07, 0.03, 0.8] },
+  // the Great Fault: pale dust and drifting seed fluff in the updraft, no embers
+  fault: { motes: [0.5, [0.95, 0.94, 0.9], [0.85, 0.87, 0.9], 0.06, 0.12, 0.35], glows: [0, [1, 1, 1], [1, 1, 1], 0.08, 0, 0] },
+  faultMid: { motes: [0.45, [0.9, 0.9, 0.88], [0.8, 0.84, 0.88], 0.06, 0.08, 0.35], glows: [0, [1, 1, 1], [1, 1, 1], 0.08, 0, 0] },
+  faultDeep: { motes: [0.42, [0.85, 0.9, 0.92], [0.75, 0.82, 0.88], 0.06, 0.05, 0.3], glows: [0, [1, 1, 1], [1, 1, 1], 0.08, 0, 0] },
+  faultCave: { motes: [0.38, [0.8, 0.78, 0.74], [0.68, 0.66, 0.64], 0.05, -0.02, 0.1], glows: [0, [1, 1, 1], [1, 1, 1], 0.07, 0, 0] },
   lantern: { motes: [0.35, [0.55, 0.7, 0.75], [0.45, 0.55, 0.65], 0.06, 0.02, 0.3], glows: [0.65, [0.35, 0.85, 1.0], [0.6, 1.0, 0.85], 0.1, 0.05, 0.9] },
 };
 

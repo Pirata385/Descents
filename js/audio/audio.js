@@ -7,11 +7,16 @@
 // - generative music whose scale, tempo and instruments change per layer.
 import { clamp, lerp } from '../core/mathutil.js';
 
+// The sounds are synthesised at modest levels (band-passed noise carries little
+// energy); the output stage lifts the whole mix to a normal listening level and
+// a limiter keeps the peaks from clipping.
+const OUTPUT_GAIN = 2.2;   // about +7 dB on top of the compressor's own make-up gain
+
 const LAYER_MUSIC = [
   { root: 146.83, scale: [0, 2, 4, 7, 9], chordLen: [9, 13], pad: 'warm', lead: 'pluck', density: 0.35, bright: 1600 },      // surface
   { root: 164.81, scale: [0, 2, 3, 5, 7, 9, 10], chordLen: [10, 15], pad: 'airy', lead: 'pluck', density: 0.3, bright: 1900 }, // layer 1
   { root: 138.59, scale: [0, 2, 3, 7, 8], chordLen: [12, 18], pad: 'glass', lead: 'bell', density: 0.22, bright: 1300 },       // layer 2
-  { root: 110.0, scale: [0, 1, 5, 6, 8], chordLen: [14, 22], pad: 'dark', lead: 'bell', density: 0.12, bright: 700 },          // layer 3
+  { root: 130.81, scale: [0, 2, 3, 5, 7, 9], chordLen: [14, 22], pad: 'airy', lead: 'bell', density: 0.16, bright: 1500 },     // layer 3: the open tube
   { root: 123.47, scale: [0, 2, 4, 6, 7, 11], chordLen: [16, 24], pad: 'choir', lead: 'chime', density: 0.16, bright: 2600 },  // layer 4
 ];
 // wind strength in the open, per layer
@@ -28,18 +33,37 @@ export class AudioEngine {
     this.phraseEnd = 0;
     this.resting = false;
     this.eventTimer = 2;
+    this.wantRunning = true;
+    // browsers only let sound start from a click, tap or key press: any of them
+    // (re)starts it, also after the phone was locked or another tab took over
+    const unlock = () => {
+      if (!this.ctx) return;
+      if (this.ctx.state !== 'running' && this.wantRunning) this.ctx.resume().catch(() => {});
+    };
+    for (const ev of ['pointerdown', 'keydown', 'touchend', 'mousedown']) window.addEventListener(ev, unlock, { capture: true, passive: true });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) unlock(); });
   }
+
+  /** Whether sound is actually playing (the browser may still be holding it back). */
+  get running() { return !!this.ctx && this.ctx.state === 'running'; }
 
   /** Must be called from a user gesture. */
   init() {
-    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    if (this.ctx) { if (this.ctx.state !== 'running') this.ctx.resume().catch(() => {}); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
-    const ctx = this.ctx = new AC();
+    // iPhone / iPad: play even when the ring/silent switch is on
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* unsupported */ }
+    const ctx = this.ctx = new AC({ latencyHint: 'interactive' });
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
     this.master = ctx.createGain();
     const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -16; comp.ratio.value = 3; comp.attack.value = 0.01; comp.release.value = 0.3;
-    this.master.connect(comp).connect(ctx.destination);
+    comp.threshold.value = -24; comp.knee.value = 10; comp.ratio.value = 2.5; comp.attack.value = 0.008; comp.release.value = 0.3;
+    const makeup = ctx.createGain(); makeup.gain.value = OUTPUT_GAIN;
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -2; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.002; limiter.release.value = 0.12;
+    this.master.connect(comp).connect(makeup).connect(limiter).connect(ctx.destination);
+    this.outTap = limiter;
     this.music = ctx.createGain(); this.music.connect(this.master);
     this.amb = ctx.createGain(); this.amb.connect(this.master);
     this.sfx = ctx.createGain(); this.sfx.connect(this.master);
@@ -84,13 +108,17 @@ export class AudioEngine {
     const s = this.settings;
     const t = this.ctx.currentTime;
     this.master.gain.setTargetAtTime((s.volMaster ?? 0.8), t, 0.05);
-    this.music.gain.setTargetAtTime((s.volMusic ?? 0.5) * 0.5, t, 0.05);
+    this.music.gain.setTargetAtTime((s.volMusic ?? 0.5) * 0.42, t, 0.05);
     this.amb.gain.setTargetAtTime((s.volAmbience ?? 0.7), t, 0.05);
     this.sfx.gain.setTargetAtTime((s.volEffects ?? 0.8), t, 0.05);
     this.uiBus.gain.setTargetAtTime((s.volEffects ?? 0.8) * 0.6, t, 0.05);
   }
 
-  suspend(on) { if (this.ctx) { if (on) this.ctx.suspend(); else this.ctx.resume(); } }
+  suspend(on) {
+    this.wantRunning = !on;
+    if (!this.ctx) return;
+    if (on) this.ctx.suspend().catch(() => {}); else this.ctx.resume().catch(() => {});
+  }
 
   // ------------------------------------------------------------------ building blocks
   noiseBuffer(kind) {
@@ -233,7 +261,7 @@ export class AudioEngine {
     const p = c.pitch * (kind === 'alarm' ? 1.25 : kind === 'threat' || kind === 'hunt' ? 0.8 : 1) / Math.sqrt(Math.max(0.5, scale));
     const n = kind === 'alarm' ? Math.min(6, c.rhythm + 2) : c.rhythm;
     const L = c.length * (kind === 'threat' ? 1.4 : 1);
-    const vol = clamp(0.1 + size * 0.08, 0.08, 0.45);
+    const vol = clamp(0.25 + size * 0.2, 0.22, 0.9);
     const gap = Math.max(0.08, L * 0.7);
     switch (c.type) {
       case 'growl':
@@ -311,7 +339,7 @@ export class AudioEngine {
   footstep(kind, speed, wet) {
     if (!this.ready) return;
     const t = this.ctx.currentTime, o = this.sfx;
-    const v = clamp(0.06 + speed * 0.012, 0.06, 0.16);
+    const v = clamp(0.06 + speed * 0.012, 0.06, 0.16) * 3.2;
     if (wet) { this.noise(o, t, { freq: 900, Q: 0.8, a: 0.01, d: 0.18, gain: v * 1.4, sweep: 400 }); return; }
     switch (kind) {
       case 'grass': this.noise(o, t, { type: 'highpass', freq: 1800, a: 0.01, d: 0.09, gain: v * 0.9 }); break;
@@ -327,7 +355,7 @@ export class AudioEngine {
 
   land(impact, kind) {
     if (!this.ready || impact < 3) return;
-    const t = this.ctx.currentTime, v = clamp(impact / 25, 0.1, 0.8);
+    const t = this.ctx.currentTime, v = clamp(impact / 25, 0.1, 0.8) * 1.6;
     this.tone(this.sfx, t, { freq: 70, d: 0.25, gain: v * 0.7, glide: 40 });
     this.noise(this.sfx, t, { type: 'lowpass', freq: kind === 'grass' ? 900 : 1600, d: 0.15, gain: v * 0.5 });
   }
@@ -337,7 +365,7 @@ export class AudioEngine {
     const t = this.ctx.currentTime;
     const o = pos ? this.out(pos) : this.sfx;
     switch (name) {
-      case 'jump': this.noise(o, t, { type: 'highpass', freq: 900, a: 0.02, d: 0.12, gain: 0.04 }); break;
+      case 'jump': this.noise(o, t, { type: 'bandpass', freq: 700, Q: 0.6, a: 0.02, d: 0.14, gain: 0.3 }); break;
       case 'grapple-fire':
         this.noise(o, t, { type: 'bandpass', freq: 3000, Q: 0.7, a: 0.01, d: 0.35, gain: 0.25, sweep: 900 });
         this.tone(o, t, { freq: 180, type: 'square', d: 0.05, gain: 0.12, lp: 900 });
@@ -383,6 +411,8 @@ export class AudioEngine {
    */
   update(dt, e, camera) {
     if (!this.ready) return;
+    // bad input (a NaN from anywhere) must not reach the audio graph
+    for (const k of ['enclosed', 'altitude', 'water', 'river', 'fall', 'city', 'chasm']) if (!Number.isFinite(e[k])) e[k] = 0;
     const ctx = this.ctx, t = ctx.currentTime;
     // listener
     const L = ctx.listener;
@@ -399,7 +429,7 @@ export class AudioEngine {
     // wind: strongest on the surface and when hanging over the void
     const chasm = e.chasm || 0;
     // the Great Fault breathes: an updraft howls along its walls
-    let wind = LAYER_WIND[Math.min(LAYER_WIND.length - 1, layer)] * open + clamp(e.altitude / 60, 0, 1) * 0.35 * open + chasm * 0.3;
+    let wind = Math.min(0.6, LAYER_WIND[Math.min(LAYER_WIND.length - 1, layer)] * open + clamp(e.altitude / 60, 0, 1) * 0.3 * open + chasm * 0.12);
     wind *= 0.75 + 0.25 * Math.sin(t * 0.13) * Math.sin(t * 0.071 + 1);
     const gust = Math.max(0, Math.sin(t * 0.23) * Math.sin(t * 0.37 + 2) - 0.3) * wind * 0.8;
     B.wind.g.gain.setTargetAtTime(wind * 0.5, t, 0.5);
@@ -409,10 +439,10 @@ export class AudioEngine {
     B.river.g.gain.setTargetAtTime(e.river * 0.16, t, 0.4);
     B.fall.g.gain.setTargetAtTime(e.fall * 0.5, t, 0.6);
     B.fall.f.frequency.setTargetAtTime(400 + e.fall * 500, t, 0.6);
-    B.howl.g.gain.setTargetAtTime(chasm * 0.05 * (0.6 + 0.4 * Math.sin(t * 0.09)), t, 1.2);
+    B.howl.g.gain.setTargetAtTime(chasm * 0.025 * (0.6 + 0.4 * Math.sin(t * 0.09)), t, 1.2);
     B.howl.f.frequency.setTargetAtTime(170 + 60 * Math.sin(t * 0.05) + wind * 80, t, 1.5);
-    B.cave.g.gain.setTargetAtTime(e.enclosed * 0.16 + (layer === 3 ? 0.12 : layer >= 4 ? 0.05 : 0), t, 0.8);
-    B.hum.g.gain.setTargetAtTime((layer >= 2 ? 0.04 : 0) + (layer === 3 ? 0.06 : 0) + e.enclosed * 0.02, t, 1.0);
+    B.cave.g.gain.setTargetAtTime(e.enclosed * 0.08 + (layer === 3 ? 0.03 : layer >= 4 ? 0.02 : 0), t, 0.8);
+    B.hum.g.gain.setTargetAtTime((layer >= 2 ? 0.01 : 0) + (layer === 3 ? 0.012 : 0) + e.enclosed * 0.006, t, 1.0);
     B.shimmer.g.gain.setTargetAtTime(layer >= 4 ? 0.018 * (1 - e.enclosed * 0.5) : 0, t, 2);
     // reverb character: tight in caves, vast in the chasm and the lower layers' open halls
     const big = clamp(Math.max(chasm, layer >= 2 ? open * 0.55 : 0), 0, 1);
@@ -460,10 +490,10 @@ export class AudioEngine {
       this.noise(o, t, { buf: this.pink, type: 'bandpass', freq: 900 + Math.random() * 700, Q: 0.7, a: 0.2, s: 0.6 + Math.random(), d: 1.2, gain: 0.12 });
       for (let i = 0, n = 3 + Math.floor(Math.random() * 6); i < n; i++) this.noise(o, t + 0.2 + Math.random() * 1.6, { freq: 600 + Math.random() * 900, Q: 3, a: 0.002, d: 0.08, gain: 0.18 });
     }
-    if (layer === 3 && e.enclosed > 0.6 && Math.random() < 0.35) {
-      // embers ticking in the warm rock of the wall caves
-      const o = this.out(around(3 + Math.random() * 8), this.amb, 2);
-      for (let i = 0, n = 2 + Math.floor(Math.random() * 4); i < n; i++) this.noise(o, t + Math.random() * 0.8, { type: 'highpass', freq: 3500, a: 0.001, d: 0.02, gain: 0.05 });
+    if (layer === 3 && (e.chasm || 0) > 0.3 && Math.random() < 0.25) {
+      // wings beating somewhere out in the tube
+      const o = this.out(around(30 + Math.random() * 60, (Math.random() - 0.5) * 40), this.amb, 10);
+      for (let i = 0, n = 3 + Math.floor(Math.random() * 4); i < n; i++) this.noise(o, t + i * 0.16, { type: 'lowpass', freq: 600, a: 0.02, d: 0.08, gain: 0.08 });
     }
     if (layer >= 4 && Math.random() < 0.5) {
       // glassy chimes of the Lantern Sea and the slow lap of dark water

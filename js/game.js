@@ -21,6 +21,61 @@ export class Game {
     this.systems = [];
     this.timeOfDay = 9;
     this.gameTime = 0;
+    // frame pacing (see schedule): a message channel runs frames back to back
+    // without waiting for the display, timers hold a chosen cap
+    this.chan = new MessageChannel();
+    this.chan.port1.onmessage = () => this.tick();
+    this.nextAt = 0;
+    this.lastVsync = 0;
+    this.refreshHz = 60;
+    this.measureRefresh();
+  }
+
+  /** The display's refresh rate, from a few animation frames. */
+  measureRefresh() {
+    const ts = [];
+    const f = (t) => {
+      ts.push(t);
+      if (ts.length < 24) { requestAnimationFrame(f); return; }
+      const d = ts.slice(1).map((v, i) => v - ts[i]).sort((a, b) => a - b);
+      const med = d[d.length >> 1];
+      if (med > 2) this.refreshHz = Math.round(1000 / med);
+    };
+    requestAnimationFrame(f);
+  }
+
+  /**
+   * Queue the next frame. settings.fpsLimit: 0 = unlimited, -1 = the display's
+   * refresh rate (V-Sync), N = at most N frames a second. Every display refresh
+   * gets a frame; when more are wanted (unlimited, or a cap above the refresh
+   * rate) extra frames run back to back through a message channel in the first
+   * part of each refresh interval, leaving the rest to the browser so it can
+   * present the picture and handle input. Menus and hidden tabs follow the display.
+   */
+  schedule() {
+    if (this.queued) return;
+    this.queued = true;
+    const lim = this.settings.fpsLimit ?? 0;
+    const extra = !(lim === -1 || this.paused || document.hidden || (lim > 0 && lim <= this.refreshHz * 0.92));
+    if (extra) {
+      const now = performance.now();
+      const until = this.lastVsync + (1000 / this.refreshHz) * 0.7;
+      const wait = lim > 0 ? Math.max(0, this.nextAt - now) : 0;
+      if (now + wait < until) {
+        if (wait > 3) setTimeout(() => this.chan.port2.postMessage(0), wait - 2);
+        else this.chan.port2.postMessage(0);
+        return;
+      }
+    }
+    requestAnimationFrame((t) => { this.queued = false; this.lastVsync = performance.now(); this.frame(t); });
+  }
+
+  tick() {
+    this.queued = false;
+    const lim = this.settings.fpsLimit ?? 0;
+    const now = performance.now();
+    if (lim > 0 && now < this.nextAt - 0.25) { this.schedule(); return; }
+    this.frame(now);
   }
 
   progress(stage, p) { if (this.hooks.onProgress) this.hooks.onProgress(stage, p); }
@@ -69,7 +124,7 @@ export class Game {
     this.world = new World(plan);
     this.renderer = new GameRenderer(this.canvas, plan, this.settings);
     this.camera = this.renderer.camera;
-    this.chunks = new ChunkManager({ world: this.world, scene: this.renderer.scene, workers: this.pool, quality: this.settings.viewDistance || 1.0 });
+    this.chunks = new ChunkManager({ world: this.world, scene: this.renderer.scene, workers: this.pool, quality: this.settings.viewDistance || 1.0, renderChunks: this.settings.renderChunks || 12 });
     if (this.hooks.onWorldReady) await this.hooks.onWorldReady(this, save);
     // initial streaming around the start position
     const focus = this.focusPoint();
@@ -87,7 +142,7 @@ export class Game {
     this.running = true;
     this.last = performance.now();
     this.chunkTimer = 0;
-    requestAnimationFrame((t) => this.frame(t));
+    this.schedule();
   }
 
   focusPoint() {
@@ -97,10 +152,16 @@ export class Game {
 
   frame(t) {
     if (!this.running) return;
-    requestAnimationFrame((tt) => this.frame(tt));
-    let dt = (t - this.last) / 1000;
-    this.last = t;
-    dt = Math.min(dt, 0.1);
+    // a cap below the refresh rate: skip display frames that come too early
+    const lim = this.settings.fpsLimit ?? 0;
+    if (lim > 0 && t < this.nextAt - 1.5) { this.schedule(); return; }
+    if (lim > 0) this.nextAt = Math.max(this.nextAt + 1000 / lim, t);
+    this.schedule();
+    // one clock for every pacing mode (animation-frame timestamps can lag performance.now())
+    const now = performance.now();
+    let dt = (now - this.last) / 1000;
+    this.last = now;
+    dt = Math.min(Math.max(dt, 0.0002), 0.1);
     if (!this.paused) this.update(dt);
     else if (this.hooks.onPausedFrame) this.hooks.onPausedFrame(dt);
     this.input.endFrame();
