@@ -10,7 +10,7 @@ import { ArtifactSystem } from '../artifacts/artifacts.js';
 import { Discovery } from '../systems/discovery.js';
 import { MapData } from '../systems/mapdata.js';
 import { EnvironmentProbe } from '../systems/environment.js';
-import { SaveStore, captureSave, applySave, exportSave, validateSave, isLegacySave } from '../systems/save.js';
+import { SaveStore, captureSave, applySave, exportSave, validateSave, isLegacySave, SAVE_VERSION } from '../systems/save.js';
 import { AudioEngine } from '../audio/audio.js';
 import { HUD } from './hud.js';
 import { TouchControls, detectTouch } from './touch.js';
@@ -22,31 +22,33 @@ import { GamepadInput, GLYPH } from '../core/gamepad.js';
 const SETTINGS_KEY = 'descents.settings.v1';
 // graphics presets; changing any of these values by hand makes the preset 'custom'
 const QUALITY = {
-  low: { viewDistance: 0.55, pixelRatio: 0.75, shadows: false, shadowSize: 1024, particles: 0.35, creatures: 32 },
-  medium: { viewDistance: 0.8, pixelRatio: 1, shadows: true, shadowSize: 1024, particles: 0.6, creatures: 48 },
-  high: { viewDistance: 1.0, pixelRatio: 1.5, shadows: true, shadowSize: 2048, particles: 1, creatures: 60 },
-  ultra: { viewDistance: 1.4, pixelRatio: 2, shadows: true, shadowSize: 4096, particles: 1, creatures: 84 },
+  low: { renderChunks: 6, viewDistance: 0.55, pixelRatio: 0.75, shadows: false, shadowSize: 1024, particles: 0.35, creatures: 32 },
+  medium: { renderChunks: 9, viewDistance: 0.8, pixelRatio: 1, shadows: true, shadowSize: 1024, particles: 0.6, creatures: 48 },
+  high: { renderChunks: 12, viewDistance: 1.0, pixelRatio: 1.5, shadows: true, shadowSize: 2048, particles: 1, creatures: 60 },
+  ultra: { renderChunks: 20, viewDistance: 1.4, pixelRatio: 2, shadows: true, shadowSize: 4096, particles: 1, creatures: 84 },
 };
-const QUALITY_KEYS = ['viewDistance', 'pixelRatio', 'shadows', 'particles', 'creatures'];
+const QUALITY_KEYS = ['renderChunks', 'viewDistance', 'pixelRatio', 'shadows', 'particles', 'creatures'];
 function presetOf(s) {
   for (const [name, q] of Object.entries(QUALITY)) if (QUALITY_KEYS.every((k) => s[k] === q[k])) return name;
   return 'custom';
 }
 
 const DEFAULT_SETTINGS = {
-  quality: 'high', shadowSize: 2048, creatures: 60,
+  quality: 'high', shadowSize: 2048, creatures: 60, fpsLimit: 0, renderChunks: 12,
   viewDistance: 1.0, shadows: true, fov: 75, sensitivity: 1, invertY: false, pixelRatio: 1.5, particles: 1,
   volMaster: 0.8, volMusic: 0.5, volAmbience: 0.7, volEffects: 0.8, showArm: true, showFps: false, autoQuality: true,
   touchControls: 'auto', touchLook: 1, touchSize: 1, touchOpacity: 0.85,
   padLook: 1, padDeadzone: 0.15, rumble: true,
 };
 // lighter defaults the first time the game runs on a phone or tablet
-const MOBILE_DEFAULTS = { ...QUALITY.low, antialias: false };
+// phones and tablets cannot show more frames than their screen refreshes, so
+// drawing extra ones only drains the battery: they start in step with the display
+const MOBILE_DEFAULTS = { ...QUALITY.low, antialias: false, fpsLimit: -1 };
 
 const TIPS = [
   'The Abyss Eye sits at the centre of the world. Every route down begins at its rim.',
   'Creatures of the first two layers ignore explorers. In the Great Fault, keep clear of nests.',
-  'There is no stair into the Great Fault: look for the swallets in the Stone Plain and follow the caves down.',
+  'There is no stair into the Great Fault: look for the stone arches on the Stone Plain. Each one marks a sinkhole into the caves of the tube walls.',
   'Windows in the fault walls look out over the chasm. Swifts and falcons nest on the ledges around them.',
   'No two creatures of a species are alike. Regional forms differ in build, crests and colour.',
   'A PS4 controller works everywhere, menus and journal included. Press any button to connect it.',
@@ -119,6 +121,11 @@ export class App {
     this.settings = loadSettings();
     this.touch = detectTouch(this.settings);
     if (this.touch && fresh) Object.assign(this.settings, MOBILE_DEFAULTS);
+    // settings saved before render distance existed: take it from their preset
+    try {
+      const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+      if (raw.renderChunks === undefined && QUALITY[raw.quality]) this.settings.renderChunks = QUALITY[raw.quality].renderChunks;
+    } catch { /* no saved settings */ }
     this.settings.quality = presetOf(this.settings);
     this.dynScale = 1;
     document.body.classList.toggle('touch', this.touch);
@@ -256,7 +263,7 @@ export class App {
         <h2>Expeditions</h2>
         <div class="save-list">${list.map((m) => `
           <div class="save-item">
-            <div><b>${esc(m.name)}</b>${m.auto ? ' <span class="muted">(autosave)</span>' : ''}${(m.version || 1) < 2 ? ' <span class="muted">(older version: begins anew)</span>' : ''}<br><span class="muted">${fmtDate(m.time)} · seed “${esc(m.seedLabel)}” · ${m.depth} m · ${LAYERS[m.layer]?.title || ''} · ${m.species} species · ${m.artifacts} artifacts</span></div>
+            <div><b>${esc(m.name)}</b>${m.auto ? ' <span class="muted">(autosave)</span>' : ''}${(m.version || 1) < SAVE_VERSION ? ' <span class="muted">(older version: begins anew)</span>' : ''}<br><span class="muted">${fmtDate(m.time)} · seed “${esc(m.seedLabel)}” · ${m.depth} m · ${LAYERS[m.layer]?.title || ''} · ${m.species} species · ${m.artifacts} artifacts</span></div>
             <div class="row"><button class="btn small" data-load="${esc(m.id)}">Load</button><button class="btn small" data-export="${esc(m.id)}">Export</button><button class="btn small danger" data-del="${esc(m.id)}">Delete</button></div>
           </div>`).join('') || '<p class="muted">No saved expeditions yet.</p>'}</div>
         <div class="row">
@@ -302,12 +309,14 @@ export class App {
         <h2>Settings</h2>
         <h3>Graphics</h3>
         <div class="set-row"><label>Quality</label><select data-key="quality">${[['low', 'Low (phones, older laptops)'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra'], ['custom', 'Custom']].map(([v, l]) => `<option value="${v}" ${s.quality === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span class="val"></span></div>
-        ${slider('viewDistance', 'View distance', 0.5, 1.6, 0.05, (v) => `${Math.round(v * 100)}%`)}
+        ${slider('renderChunks', 'Render distance (chunks of 32 m)', 3, 32, 1, (v) => `${v}`)}
+        ${slider('viewDistance', 'Terrain detail', 0.5, 1.6, 0.05, (v) => `${Math.round(v * 100)}%`)}
         ${slider('pixelRatio', 'Resolution scale', 0.5, 2, 0.25, (v) => `${v}×`)}
         ${slider('particles', 'Particles', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`)}
         ${slider('creatures', 'Creatures nearby', 16, 96, 4, (v) => `${v}`)}
         ${check('shadows', 'Shadows')}
-        ${check('autoQuality', 'Adapt resolution and view distance to keep the frame rate smooth')}
+        ${check('autoQuality', 'Adapt resolution and terrain detail to keep the frame rate smooth')}
+        <div class="set-row"><label>Frame rate limit</label><select data-key="fpsLimit">${[[0, 'Unlimited'], [-1, 'Display refresh rate (V-Sync)'], [30, '30 FPS'], [45, '45 FPS'], [60, '60 FPS'], [90, '90 FPS'], [120, '120 FPS'], [144, '144 FPS'], [165, '165 FPS'], [240, '240 FPS']].map(([v, l]) => `<option value="${v}" ${Number(s.fpsLimit ?? 0) === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span class="val"></span></div>
         ${slider('fov', 'Field of view', 60, 100, 1, (v) => `${v}°`)}
         ${check('showArm', 'Show the grappling arm')}
         ${check('showFps', 'Show frame rate')}
@@ -339,7 +348,7 @@ export class App {
         s[key] = el.type === 'checkbox' ? el.checked : Number(el.value);
         if (valEl) {
           const v = s[key];
-          valEl.textContent = key === 'viewDistance' || key === 'particles' || key.startsWith('vol') || key === 'touchSize' || key === 'touchOpacity' ? `${Math.round(v * 100)}%` : key === 'fov' ? `${v}°` : key === 'pixelRatio' ? `${v}×` : key === 'creatures' ? `${v}` : Number(v).toFixed(2);
+          valEl.textContent = key === 'viewDistance' || key === 'particles' || key.startsWith('vol') || key === 'touchSize' || key === 'touchOpacity' ? `${Math.round(v * 100)}%` : key === 'fov' ? `${v}°` : key === 'pixelRatio' ? `${v}×` : key === 'creatures' || key === 'renderChunks' ? `${v}` : Number(v).toFixed(2);
         }
         if (QUALITY_KEYS.includes(key)) {
           s.quality = presetOf(s);
@@ -352,7 +361,7 @@ export class App {
     this.screen.querySelectorAll('select[data-key]').forEach((el) => {
       el.onchange = () => {
         const key = el.dataset.key;
-        s[key] = el.value;
+        s[key] = key === 'fpsLimit' ? Number(el.value) : el.value;
         if (key === 'quality' && QUALITY[el.value]) {
           // a preset sets every graphics value at once
           Object.assign(s, QUALITY[el.value]);
@@ -375,6 +384,7 @@ export class App {
     if ((key === 'touchSize' || key === 'touchOpacity') && this.touchUI) this.touchUI.applySize();
     if (!g || !g.renderer) return;
     if (key === 'viewDistance') g.chunks.setQuality(this.settings.viewDistance);
+    if (key === 'renderChunks') { g.chunks.setRenderDistance(this.settings.renderChunks); g.renderer.setRenderDistance(this.settings.renderChunks); g.chunks.update(g.focusPoint()); }
     if (key === 'shadows') g.renderer.setShadows(this.settings.shadows);
     if (key === 'shadowSize') g.renderer.setShadowSize(this.settings.shadowSize);
     if (key === 'pixelRatio') { this.dynScale = 1; g.renderer.setPixelRatio(this.settings.pixelRatio); }
@@ -747,7 +757,9 @@ export class App {
     if (this.qualityT < 1.5) return;
     this.qualityT = 0;
     // phones aim for a steady 30+, computers for 50+
-    const target = this.touch ? 30 : 20;
+    // (a frame rate cap chosen by the player is not a reason to lower the quality)
+    const cap = (s.fpsLimit ?? 0) > 0 ? 1000 / s.fpsLimit : 0;
+    const target = Math.max(this.touch ? 30 : 20, cap * 1.08);
     const cur = g.chunks.quality ?? s.viewDistance;
     const setRes = (k) => {
       if (Math.abs(k - this.dynScale) < 0.02) return;
@@ -761,7 +773,7 @@ export class App {
       else if (this.slowT > 2 && cur > 0.55) {
         this.slowT = 0;
         g.chunks.setQuality(Math.max(0.5, cur - 0.1));
-        if (!this.qualityNoted) { this.qualityNoted = true; this.hud.notify('Lowering view distance to keep the frame rate smooth (see Settings).', 'info', 6); }
+        if (!this.qualityNoted) { this.qualityNoted = true; this.hud.notify('Lowering terrain detail to keep the frame rate smooth (see Settings).', 'info', 6); }
       }
     } else if (this.frameEma < target * 0.8) {
       this.slowT = 0;
@@ -773,13 +785,23 @@ export class App {
 
   audioUpdate(dt) {
     const g = this.game;
+    // the browser keeps sound off until a click, tap or key press (a controller does not count)
+    if (this.audio.ctx && !this.audio.running && this.state === 'playing') {
+      this.mutedT = (this.mutedT || 0) + dt;
+      if (this.mutedT > 2 && !this.mutedNoted) { this.mutedNoted = true; this.hud.notify('Sound is waiting for a click, tap or key press — the browser requires one before it plays audio.', 'info', 10); }
+    } else this.mutedT = 0;
     if (!this.audio.ready) return;
     const e = g.envProbe.state, info = g.layerInfo || { layer: 0 };
+    // sound must never stop the picture: a failure here is reported once and skipped
+    try {
     this.audio.update(dt, {
       pos: g.player.pos, layer: info.layer, zone: info.zone, enclosed: g.envEnclosed || 0, altitude: e.altitude,
       water: e.water, river: e.river, fall: e.fall, city: e.city, chasm: e.chasm, night: g.renderer.night > 0.5,
       reeling: g.grapple.attached && g.grapple.reeling, paying: g.grapple.attached && g.grapple.paying,
     }, g.camera);
+    } catch (err) {
+      if (!this.audioErr) { this.audioErr = true; console.warn('audio update failed', err); }
+    }
   }
 
   async save(auto) {

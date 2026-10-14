@@ -38,7 +38,7 @@ controls*). Starting a game goes full screen and locks landscape where the
 browser allows it; turning the device upright pauses the game and asks you to
 rotate back. Adding the page to the home screen launches it full screen in
 landscape. The first launch on a mobile device picks the **Low** graphics
-preset, and the resolution (then the view distance) adapts automatically if
+preset (render distance 6 chunks, frame rate in step with the screen), and the resolution (then the view distance) adapts automatically if
 the frame rate drops. A PS4 controller paired with the phone or tablet works
 too — the touch buttons hide while you use it.
 
@@ -146,16 +146,19 @@ chamber over the **Stone Plain**, a pale rock plain with scattered trees,
 pools, ruins, rock formations and its own creatures.
 
 ### Layer 3 — The Great Fault (900–1900 m)
-The plain is split by the Great Fault, a chasm about 300 m across that drops
-a full kilometre. There is no staircase into it: the way down is a **natural
-cave network** in its walls. Swallets (sinkholes) in the floor of the plain
-open into passages that wind, switch back and corkscrew down through the
-rock from hall to hall — vaults, galleries and grottos with their own names —
-along two main trunks that cross, merge and loop, with dead-end dens and side
-passages. **Windows** break out onto the void: ledges with a view across the
-chasm, its nesting cliffs and the faint glow far below. The rock changes with
-depth (ember-veined in the upper reach, rust strata in the middle, cold
-lichen-lit deeps near the bottom), and so do the light, fog and sound.
+The Stone Plain opens onto the Great Fault: a colossal round **tube** some
+250–300 m across whose pale walls of limestone and granite drop almost sheer
+for a full kilometre, stepping in gentle ledges and overhangs, hazy with the
+daylight that filters down from far above. There is no staircase into it:
+the way down is a **natural cave network** inside its walls. Every way in is
+marked on the plain by a pale **stone arch** and a ring of standing stones
+over a sinkhole (three to five per world, spread around the tube); each
+sinkhole opens into passages that wind, switch back and corkscrew down
+through the rock from hall to hall — vaults, galleries and grottos with
+their own names — along two main trunks that cross, merge and loop, with
+dead-end dens and side passages. **Windows** break out onto the void:
+ledges with a view across the tube, its nesting cliffs and moss-grown
+ledges, and the mist far below.
 
 At the bottom the lowest passage opens into **the Basin**, a cavern floor of
 dark pools and pale fungus, and from there **the Fourth Gate** leads to the
@@ -246,7 +249,12 @@ young that follow their parents, flock, mob a predator, defend a territory,
 live beside a host, investigate the explorer or sleep by its activity
 cycle. Creatures live where their bodies fit: on the ground, in the cave
 passages, on the chasm walls, in the air, perched, or hanging from roosts.
-Animals of the surface and Layers 1 and 2 never attack the explorer; a
+Creatures keep appearing as you travel: whenever there is room under the
+creature limit (*Settings → Graphics → Creatures nearby*), new individuals
+are placed in real habitat around you — out of sight, in the kind of place
+their species lives — and those you leave behind are folded back into their
+region's population, making room for the next ones. Animals of the surface
+and Layers 1 and 2 never attack the explorer; a
 quiet, still observer is gradually tolerated. In the Great Fault, nesting
 falcons and wall lizards defend their eggs — come too close and they will
 dive at you until you back off.
@@ -293,22 +301,26 @@ the seed and everything that changed — your position and state, discoveries,
 catalog, artifacts, explored map, trail and ecosystem populations — so
 loading regenerates exactly the same world. Saves can be exported to and
 imported from JSON files. Version 0.3.0 rebuilt the world below the Stone
-Plain and the creatures, so a save made by an earlier version starts its
-seed anew (the game says so when you load it).
+Plain and the creatures, and 0.4.0 reshaped the Great Fault, so a save made
+by an earlier version starts its seed anew (the game says so when you load
+it).
 
 ### Atmosphere
 Each layer has its own lighting, fog, sky, particles (pollen, fireflies,
-spores, cave dust, embers, the motes of the Lantern Sea) and sound. Days and
-nights pass (one game hour per real minute). Below the plain the sun no
-longer reaches: the fault is lit by ember veins, glowing lichen and fungus,
-shafts of light from the plain far above, the creatures' own glow and your
-lamp. All audio is synthesised live: wind (and the updraft howling through
-the fault), rivers, lakes, waterfalls, cave drips, scree falls, ticking
-embers, the chimes of the Lantern Sea, the city, footsteps per ground
-material, the arm's winch, every species' own call derived from its genome,
-and generative music whose scale and instruments change with each layer.
-Reverb follows the space: tight in passages, vast in the chasm, with an
-echo off its far wall.
+spores, cave dust, the pale dust of the fault, the motes of the Lantern Sea)
+and sound. Days and nights pass (one game hour per real minute). The Great
+Fault is bright and misty: daylight scattered by haze between its pale
+walls, a little cooler deeper down, dimmer inside the caves. All audio is
+synthesised live: wind (and the updraft howling through the fault), rivers,
+lakes, waterfalls, cave drips, scree falls, wingbeats in the tube, the
+chimes of the Lantern Sea, the city, footsteps per ground material, the
+arm's winch, every species' own call derived from its genome, and
+generative music whose scale and instruments change with each layer.
+Reverb follows the space: tight in passages, vast in the tube, with an
+echo off its far wall. A compressor, make-up gain and limiter keep the mix
+at a normal listening level. Browsers only start sound after a click, tap
+or key press; if you start with a controller, the game tells you when it is
+still waiting for one.
 
 ---
 
@@ -366,18 +378,29 @@ terrain rules for a new layer go in `field.js` / `column.js`, its routes in
 up from its definition.
 
 ### Performance
-The world is never instantiated whole. A quadtree of hexagonal chunks streams
-around the explorer with six levels of detail, meshed in parallel web workers;
-far chunks are simplified and foliage is limited to near chunks. Creatures
-are materialised only within ~120 m (16–96 at a time, by setting) with the
-rest of the ecosystem simulated abstractly; distant individuals think,
-move and animate at a lower rate, new regions are surveyed and new bodies
-built within a small time budget per frame, and each body is a single draw
-call. The shadow map is only redrawn where the sun reaches. Graphics presets
-(Low, Medium, High, Ultra) set view distance, resolution, shadows, particles
-and creature count; with automatic quality on, the game first lowers the
-rendering resolution and then the view distance to hold the frame rate,
-and gives them back when it can.
+The world is never instantiated whole. Like a block game, only the chunks
+within the **render distance** (*Settings → Graphics*, 3–32 chunks of 32 m)
+are built and drawn; a quadtree of hexagonal chunks streams around the
+explorer with levels of detail inside that radius, meshed in parallel web
+workers, and a fog closes in towards the edge so the world fades out instead
+of ending at a visible border (fog distances are measured from the eye, so
+the edge does not swing as you turn). *Terrain detail* sets how far full
+detail reaches. Creatures live within an area that follows the render
+distance (up to ~170 m, 16–96 at a time, by setting) with the rest of the
+ecosystem simulated abstractly; distant individuals think, move and animate
+at a lower rate, new bodies are built within a small time budget per frame,
+and each body is a single draw call. The shadow map is only redrawn where
+the sun reaches. Graphics presets (Low, Medium, High, Ultra) set render
+distance, terrain detail, resolution, shadows, particles and creature
+count; with automatic quality on, the game first lowers the rendering
+resolution and then the terrain detail to hold the frame rate, and gives
+them back when it can.
+
+The frame rate is not capped: *Frame rate limit* offers Unlimited (the
+default on computers: every screen refresh gets a frame, and extra frames
+are drawn in between while leaving the browser time to show them), the
+display's refresh rate (V-Sync, the default on phones and tablets, where
+extra frames only drain the battery) and fixed caps from 30 to 240 FPS.
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "descents",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Descents - a procedural first-person abyss exploration game for the browser.",
   "type": "module",
   "private": true,

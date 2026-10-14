@@ -25,9 +25,8 @@ import { Habitats, BAND } from './habitat.js';
 import { Z_CITY } from '../world/field.js';
 
 const RS = 64;              // region size (m)
-const ACTIVE_R = 120;       // populations within this radius are materialised
-const DROP_R = 175;         // individuals beyond this are folded back into the population
-const VIS_R = 150;          // render distance
+const ACTIVE_R = 120;       // radius of the creatures' area (it follows the render distance, see areaRadius)
+const VIS_R = 150;          // default drawing distance for creatures
 const POOL = 6;             // genomes kept per species and region
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -84,16 +83,19 @@ export class Ecosystem {
     return `${band}:${i}:${j}:${slice}`;
   }
 
-  /** The region for a key, created on first use; null if creating it would overrun `deadline`. */
+  /**
+   * The region for a key, created on first use. Surveying its habitat (for the
+   * background population model) is skipped when `deadline` has passed and done
+   * on a later call.
+   */
   region(key, x, y, z, band, deadline = Infinity) {
     let r = this.regions.get(key);
     if (r && r.init) return r;
-    if (performance.now() > deadline) return null;
     if (!r) {
       r = { key, band, x: (Math.floor(x / RS) + 0.5) * RS, y, z: (Math.floor(z / RS) + 0.5) * RS, pops: new Float32Array(this.species.length), K: new Float32Array(this.species.length), pools: [], init: false, active: false };
       this.regions.set(key, r);
     }
-    this.initRegion(r);
+    if (performance.now() <= deadline) this.initRegion(r);
     return r;
   }
 
@@ -253,7 +255,7 @@ export class Ecosystem {
   despawn(a) {
     const r = a.region;
     if (r && !a.dead) {
-      r.pops[a.sp.id] = Math.min(r.K[a.sp.id] * 1.5 + 1, r.pops[a.sp.id] + 1);
+      if (r.init) r.pops[a.sp.id] = Math.min(r.K[a.sp.id] * 1.5 + 1, r.pops[a.sp.id] + 1);
       const pool = r.pools[a.sp.id] || (r.pools[a.sp.id] = []);
       pool.push(a.genes);
       if (pool.length > POOL) pool.shift();
@@ -271,86 +273,104 @@ export class Ecosystem {
     this.carcasses.push({ pos: a.pos.clone(), meat: a.ph.scale * 2, time: 240, sp: a.sp });
   }
 
-  // ------------------------------------------------------------------ activation
+  // ------------------------------------------------------------------ spawning
+  /**
+   * The area around the explorer where creatures live: it follows the render
+   * distance (nothing is spawned in the fog), within sensible bounds.
+   */
+  areaRadius() {
+    const edge = this.game.renderer && this.game.renderer.fogEdge;
+    return clamp(edge ? edge * 0.85 : ACTIVE_R, 60, ACTIVE_R + 50);
+  }
+
+  /**
+   * Like the mobs of a block game, creatures keep appearing wherever there is
+   * room for them. Twice a second: individuals that left the explorer's area
+   * are folded back into their region's population (their genomes stay in its
+   * pool), then free places are filled, up to the creature limit, by picking
+   * random spots around the explorer, a species that can live in that kind of
+   * place (weighted by how common it is there and by how many are already
+   * around), and a point of real habitat for it. Spawns stay out of sight.
+   */
   updateActivation(ppos) {
-    // regions around the explorer in the bands near its depth
-    const bands = new Set();
-    for (const dy of [0, -45, 45, -110, 110]) bands.add(this.hab.bandAt(ppos.x, ppos.y + dy, ppos.z));
-    if (this.hab.bandAt(ppos.x, ppos.y, ppos.z) === BAND.CAVE3 || this.hab.bandAt(ppos.x, ppos.y, ppos.z) === BAND.CHASM) { bands.add(BAND.CAVE3); bands.add(BAND.CHASM); }
-    const want = new Set();
-    for (const r of this.regions.values()) r.active = false;
-    const rr = Math.ceil(ACTIVE_R / RS);
-    const ci = Math.floor(ppos.x / RS), cj = Math.floor(ppos.z / RS);
-    // nearest regions first; surveying new ground is spread over several passes
-    const cells = [];
-    for (let dj = -rr; dj <= rr; dj++) for (let di = -rr; di <= rr; di++) {
-      const x = (ci + di + 0.5) * RS, z = (cj + dj + 0.5) * RS;
-      const d = Math.hypot(x - ppos.x, z - ppos.z);
-      if (d <= ACTIVE_R + RS * 0.5) cells.push([d, x, z]);
-    }
-    cells.sort((A, B) => A[0] - B[0]);
-    const deadline = performance.now() + 4;
-    for (const [, x, z] of cells) {
-      for (const b of bands) {
-        for (const dy of b === BAND.CAVE3 || b === BAND.CHASM ? [0, -160, 160] : [0]) {
-          const y = ppos.y + dy;
-          const key = this.regionKey(b, x, y, z);
-          if (want.has(key)) continue;
-          want.add(key);
-          const r = this.region(key, x, y, z, b, deadline);
-          if (r) r.active = true;
-        }
-      }
-    }
-    // despawn far individuals
-    const live = this.agents.filter((a) => !a.dead);
-    for (const a of live) {
+    const areaR = this.areaRadius();
+    this.visR = areaR + 25;
+    const dropR = areaR + 35;
+    // fold back the ones that left the area
+    for (const a of this.agents) {
+      if (a.dead) continue;
       const d = a.pos.distanceTo(ppos);
-      if (d > (a.mode === 'air' ? DROP_R + 60 : DROP_R) || (Math.abs(a.pos.y - ppos.y) > 220)) this.despawn(a);
+      if (d > (a.mode === 'air' ? dropR + 40 : dropR) || Math.abs(a.pos.y - ppos.y) > 220) this.despawn(a);
     }
-    // spawn: per active region, materialise its population (within the global budget)
-    let count = this.agents.filter((a) => !a.dead).length;
-    const active = [...this.regions.values()].filter((r) => r.active);
-    active.sort((A, B) => Math.hypot(A.x - ppos.x, A.z - ppos.z) - Math.hypot(B.x - ppos.x, B.z - ppos.z));
-    const camFwd = _v3.set(0, 0, -1);
-    if (this.game.camera) camFwd.applyQuaternion(this.game.camera.quaternion);
-    for (const r of active) {
-      if (count >= this.maxAgents) break;
-      for (let si = 0; si < this.sp.length && count < this.maxAgents; si++) {
-        const S = this.sp[si];
-        const pop = r.pops[si];
-        if (pop < 0.5) continue;
-        const have = live.filter((a) => a.region === r && a.S === S && !a.dead).length;
-        const want = Math.min(Math.round(pop), S.s.behavior.groupSize[1] + 2);
-        if (have >= want) continue;
-        // spawn a group together
-        const rng = S.rng;
-        const center = this.hab.sample(S.s, rng, r.x, ppos.y, r.z, RS * 0.75);
-        if (!center) continue;
-        // keep spawns out of the explorer's immediate view
-        const dx = center.x - ppos.x, dz = center.z - ppos.z, d = Math.hypot(dx, dz);
-        if (d < 22 || (d < 55 && (dx * camFwd.x + dz * camFwd.z) / d > 0.55)) continue;
-        const n = Math.min(want - have, this.maxAgents - count);
-        const groupId = n > 1 ? this.nextId * 31 : null;
-        let leader = null;
-        for (let k = 0; k < n; k++) {
-          const p = k === 0 ? center : this.hab.sample(S.s, rng, center.x, center.y, center.z, 6 + S.s.size * 4) || center;
-          const g = this.genesFor(S, r, p, rng);
-          const a = this.spawn(S, p, g, { region: r });
-          r.pops[si] = Math.max(0, r.pops[si] - 1);
-          a.group = groupId;
-          if (!leader) leader = a;
-          a.leader = leader;
-          // young of the group follow an adult
-          if (a.juvenile && leader !== a) a.parent = leader;
-          count++;
-        }
-      }
-    }
+    // and clear away the departed and the long dead
     this.agents = this.agents.filter((a) => {
       if (a.dead && (a.gone || a.deadT > 3)) { this.dispose(a); return false; }
       return true;
     });
+    // regions in the area are "active": their numbers are the creatures present
+    for (const r of this.regions.values()) r.active = Math.hypot(r.x - ppos.x, r.z - ppos.z) < areaR + RS * 0.5 && Math.abs(r.y - ppos.y) < 240;
+    let count = 0;
+    const perSp = new Map();
+    for (const a of this.agents) if (!a.dead) { count++; perSp.set(a.S, (perSp.get(a.S) || 0) + 1); }
+    if (count >= this.maxAgents) return;
+    const camFwd = _v3.set(0, 0, -1);
+    if (this.game.camera) camFwd.applyQuaternion(this.game.camera.quaternion);
+    const rng = this.spawnRng || (this.spawnRng = RNG.derive(this.plan.seed, 'spawn'));
+    const t0 = performance.now();
+    const deadline = t0 + 3;
+    for (let attempt = 0; attempt < 16 && count < this.maxAgents && performance.now() - t0 < 5; attempt++) {
+      // a random spot in the area (uniform over its surface), not right beside the explorer
+      const ang = rng.range(0, Math.PI * 2), dist = 22 + Math.sqrt(rng.next()) * (areaR - 22);
+      const x = ppos.x + Math.cos(ang) * dist, z = ppos.z + Math.sin(ang) * dist;
+      const dy = rng.pick([0, 0, 0, -40, 40, -100, 100]);
+      const y = ppos.y + dy;
+      const band = this.hab.bandAt(x, y, z);
+      // which species can live there, and how likely each is
+      let tot = 0;
+      const cand = [];
+      for (const S of this.sp) {
+        if (!S.bands.includes(band)) continue;
+        const key = this.regionKey(band, x, y, z);
+        const r = this.regions.get(key);
+        const si = S.s.id;
+        const abundance = r && r.init && r.K[si] > 0 ? clamp(r.pops[si] / r.K[si], 0.25, 1.5) : r && r.init ? 0.15 : 1;
+        const crowd = (perSp.get(S) || 0) / (S.s.behavior.groupSize[1] + 2);
+        // the open tube is where the eye goes: its fliers and climbers are favoured
+        // over the small cave fauna, which fills the caves when the explorer is in them
+        const open = S.s.layer === 'layer3' ? (S.s.behavior.habitat === 'cave' ? 0.55 : 1.8) : 1;
+        const w = S.cap * abundance * open / (1 + crowd * crowd * 2);
+        if (w <= 0) continue;
+        cand.push([S, w]); tot += w;
+      }
+      if (!tot) continue;
+      let pick = rng.next() * tot, S = cand[0][0];
+      for (const [c, w] of cand) { pick -= w; if (pick <= 0) { S = c; break; } }
+      const center = this.hab.sample(S.s, S.rng, x, y, z, 24);
+      if (!center) continue;
+      // out of sight: never right beside the explorer, nor close in front of it
+      const dx = center.x - ppos.x, dz = center.z - ppos.z, d = Math.hypot(dx, dz);
+      if (d < 20 || d > areaR + 10 || (d < 60 && (dx * camFwd.x + dz * camFwd.z) / d > 0.5)) continue;
+      const cband = this.hab.bandAt(center.x, center.y + 0.5, center.z);
+      const key = this.regionKey(cband, center.x, center.y, center.z);
+      const r = this.region(key, center.x, center.y, center.z, cband, deadline);
+      const si = S.s.id;
+      const G2 = S.s.behavior.groupSize;
+      const n = Math.max(1, Math.min(rng.int(G2[0], G2[1]), this.maxAgents - count));
+      const groupId = n > 1 ? this.nextId * 31 : null;
+      let leader = null;
+      for (let k = 0; k < n; k++) {
+        const p = k === 0 ? center : this.hab.sample(S.s, S.rng, center.x, center.y, center.z, 6 + S.s.size * 4) || center;
+        const g = this.genesFor(S, r, p, S.rng);
+        const a = this.spawn(S, p, g, { region: r });
+        if (r.init) r.pops[si] = Math.max(0, r.pops[si] - 1);
+        a.group = groupId;
+        if (!leader) leader = a;
+        a.leader = leader;
+        if (a.juvenile && leader !== a) a.parent = leader;
+        count++;
+        perSp.set(S, (perSp.get(S) || 0) + 1);
+      }
+    }
   }
 
   // ------------------------------------------------------------------ main update
@@ -369,7 +389,7 @@ export class Ecosystem {
     this.tickTimer -= dt;
     if (this.tickTimer <= 0) { this.tickTimer = 5; this.abstractTick(5); }
     this.activationTimer -= dt;
-    if (this.activationTimer <= 0) { this.activationTimer = 1.0; this.updateActivation(player.pos); }
+    if (this.activationTimer <= 0) { this.activationTimer = 0.5; this.updateActivation(player.pos); }
     // build bodies within a small time budget per frame (at least one)
     const bt = performance.now();
     while (this.buildQueue.length) {
@@ -393,7 +413,8 @@ export class Ecosystem {
         d2 = a.pos.distanceToSquared(cam);
       }
       if (!a.obj) continue;
-      a.visible = d2 < VIS_R * VIS_R;
+      const vr = this.visR || VIS_R;
+      a.visible = d2 < vr * vr;
       a.obj.root.visible = a.visible;
       if (!a.visible) continue;
       this.place(a);
@@ -669,7 +690,7 @@ export class Ecosystem {
           // the local population stays local: strays turn back toward the explorer's
           // surroundings instead of drifting off and being folded back into the pool
           const P = this.playerAgent.pos;
-          if (a.pos.distanceTo(P) > ACTIVE_R) base = _lv.lerpVectors(a.pos, P, 0.45);
+          if (a.pos.distanceTo(P) > this.areaRadius() * 0.85) base = _lv.lerpVectors(a.pos, P, 0.45);
           a.wanderPt.set(base.x + (Math.random() - 0.5) * 2 * r, base.y + (air ? (Math.random() - 0.5) * 20 : 0), base.z + (Math.random() - 0.5) * 2 * r);
           for (const at of this.attractors) if (at.pos.distanceTo(a.pos) < 35 && a.sp.behavior.diet !== 'carnivore') a.wanderPt.copy(at.pos);
           // keep away from where something frightened it

@@ -5,9 +5,10 @@
 // to / imported from JSON files.
 //
 // Version 2 (v0.3.0) rebuilt the world below the Stone Plain and the
-// creatures, so version 1 saves cannot be restored: loading one begins the
-// same seed anew (see App.startGame).
-export const SAVE_VERSION = 2;
+// creatures; version 3 (v0.4.0) reshaped the Great Fault into a tube. Older
+// saves cannot be restored: loading one begins the same seed anew (see
+// App.startGame).
+export const SAVE_VERSION = 3;
 const INDEX_KEY = 'descents.saves.v1';
 const SLOT_PREFIX = 'descents.save.v1.';
 

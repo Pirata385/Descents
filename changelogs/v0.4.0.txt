@@ -1,0 +1,80 @@
+DESCENTS — version 0.4.0
+Date: 2026-10-14
+Sound you can hear, render distance in chunks with edge fog, an uncapped
+frame rate with an optional limit, creatures that keep appearing everywhere,
+and the Great Fault reshaped into a bright, pale tube with marked entrances.
+
+SOUND
+- The mix was far too quiet (around -33 dB, footsteps around -59 dB): a
+  compressor, make-up gain and limiter now bring it to a normal listening
+  level (about -18 dB) without clipping; footsteps, jumps, landings and
+  creature calls were rebalanced and the deep hum and cave rumble lowered.
+- Sound starts (or restarts after the phone was locked or another tab took
+  over) on any click, tap or key press. iPhones and iPads play even with
+  the silent switch on (where the browser allows it).
+- If the browser is still holding sound back (for example when the game was
+  started with a controller only, which browsers do not count), a notice
+  says so.
+- A NaN from the environment can no longer stop the picture: audio errors
+  are reported once and skipped.
+
+RENDER DISTANCE
+- The whole map is no longer rendered. Like a block game, only the chunks
+  within the render distance are built and drawn (Settings -> Graphics ->
+  Render distance, 3 to 32 chunks of 32 m). Chunks that cross the edge are
+  split small so nothing coarse pokes out beyond it.
+- A fog closes in from 60% of the render distance and hides the edge
+  completely; it is measured from the eye, so the edge is a circle and does
+  not swing as the view turns. The low sky takes the colour of the fog, and
+  the great falls and light shafts fade at the edge too.
+- Presets: Low 6 chunks, Medium 9, High 12, Ultra 20. The old "view
+  distance" slider is now "Terrain detail" (how far full detail reaches).
+
+FRAME RATE
+- No frame cap: "Unlimited" draws a frame on every screen refresh and more
+  in between, while leaving the browser time to present them and handle
+  input. "Display refresh rate (V-Sync)" and caps of 30 to 240 FPS are
+  available under Settings -> Graphics -> Frame rate limit. Phones and
+  tablets start in V-Sync to save battery.
+- Automatic quality no longer lowers the quality because of a cap the
+  player chose.
+
+CREATURES
+- Creatures keep appearing as you travel, in every layer: whenever there is
+  room under the creature limit, new individuals are placed in real habitat
+  around you (out of sight, in the kind of place their species lives), and
+  those left behind are folded back into their region's population to make
+  room. Before, a region's numbers ran down as its creatures were seen,
+  killed or saved, and could stay empty.
+- The creature area follows the render distance (up to ~170 m); creatures
+  are drawn within it.
+- In the Great Fault, the fliers and climbers of the open tube are favoured
+  where the tube is in view; the cave fauna fills the caves.
+- Layer 3 species wear pale greys, slate blues and soft browns (a few are
+  crimson) instead of ember and soot tones.
+
+LAYER 3 — THE GREAT FAULT
+- Reshaped into a wide, nearly round tube (about 250-300 m across) that
+  drops almost sheer for a kilometre, with gentle ledges and overhangs and
+  caves inside its walls. The mouth in the Stone Plain is the top of the
+  tube.
+- Pale limestone and granite walls with bedding layers and speckle; moss
+  and grass tufts on the open ledges; pale stalagmites in the caves. The
+  ember veins, lava-veined basalt and glowing lichen are gone.
+- Bright and misty: daylight scattered by haze, a little cooler deeper
+  down, dimmer inside the caves and at night. Pale dust drifts in the
+  updraft instead of embers. Airier music and wingbeats in the tube.
+- Entrances you can find: three to five sinkholes per world, spread around
+  the tube, each marked by a pale stone arch and a ring of standing stones
+  visible from across the plain, and discovered from 75 m away.
+
+SAVES
+- Save format version 3: saves from 0.3.0 and earlier start their seed anew,
+  because the Great Fault changed.
+
+TESTS
+- Creature suite: a travelling explorer keeps meeting creatures from the
+  rim down into Layer 2, those left behind are folded back, and none linger
+  outside the area.
+- All 54 automated tests pass; the autopilot walks the reshaped cave network
+  from the plain (861 m) to the Fourth Gate (1964 m) with real physics.

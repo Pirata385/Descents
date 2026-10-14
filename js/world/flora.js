@@ -158,6 +158,14 @@ function mushroom(rng, cap, glow) {
   return t.finish();
 }
 
+/** Tall rounded spike of cave stone (no dark underside: its flanks show). */
+function stalagmite(rng, color) {
+  const t = new Template();
+  t.blob(0, 0.55, 0, rng.range(0.32, 0.42), rng.range(0.85, 1.05), rng.range(0.32, 0.42), color, rng, { jitter: 0.18, shadeTop: true });
+  t.blob(rng.range(-0.08, 0.08), 1.35, rng.range(-0.08, 0.08), 0.16, 0.42, 0.16, color, rng, { jitter: 0.12, shadeTop: true });
+  return t.finish();
+}
+
 function rockLump(rng, color, size = 1) {
   const t = new Template();
   t.blob(0, size * 0.25, 0, size * rng.range(0.5, 0.9), size * rng.range(0.3, 0.55), size * rng.range(0.5, 0.9), color, rng, { jitter: 0.3, shadeTop: true, aoBottom: true });
@@ -343,7 +351,7 @@ function anchorPost() {
 export function buildFlora(params) {
   const rng = RNG.derive(params.seed, 'flora');
   const pal = params.palette, fol = params.foliage;
-  const T = { grass: [], meadow: [], moss: [], flowers: [], shrubs: [], berry: [], trees: [], conifers: [], pale: [], ferns: [], reeds: [], crops: [], mush: [], glowMush: [], rocks: [], vines: [], inv: [], invLow: [], cliff: [], cliffLow: [], treesLow: [] };
+  const T = { grass: [], meadow: [], moss: [], flowers: [], shrubs: [], berry: [], trees: [], conifers: [], pale: [], ferns: [], reeds: [], crops: [], mush: [], glowMush: [], rocks: [], paleRocks: [], stalagmites: [], vines: [], inv: [], invLow: [], cliff: [], cliffLow: [], treesLow: [] };
   for (let i = 0; i < 4; i++) T.grass.push(grassTuft(rng, pal[1], 0.55, 5));
   for (let i = 0; i < 4; i++) T.meadow.push(grassTuft(rng, pal[28], 0.75, 6));
   for (let i = 0; i < 3; i++) T.moss.push(grassTuft(rng, mixRGB(pal[6], [0.4, 0.7, 0.5], 0.2), 0.35, 6));
@@ -359,6 +367,9 @@ export function buildFlora(params) {
   for (let i = 0; i < 2; i++) T.mush.push(mushroom(rng, [0.6, 0.3, 0.2], 0));
   for (let i = 0; i < 2; i++) T.glowMush.push(mushroom(rng, fol.invertedGlow, 0.9));
   for (let i = 0; i < 3; i++) T.rocks.push(rockLump(rng, pal[3], rng.range(0.7, 1.4)));
+  // the pale limestone of the Great Fault
+  for (let i = 0; i < 3; i++) T.paleRocks.push(rockLump(rng, [0.63, 0.62, 0.59], rng.range(0.7, 1.4)));
+  for (let i = 0; i < 3; i++) T.stalagmites.push(stalagmite(rng, [0.66, 0.65, 0.62]));
   for (let i = 0; i < 3; i++) T.vines.push(vine(rng, mixRGB(fol.inverted, [0.15, 0.35, 0.2], 0.4), 1));
   for (let i = 0; i < 4; i++) T.inv.push(invertedTree(rng, fol.paleBark, fol.inverted, fol.invertedGlow, true));
   for (let i = 0; i < 2; i++) T.invLow.push(invertedTree(rng, fol.paleBark, fol.inverted, fol.invertedGlow, false));

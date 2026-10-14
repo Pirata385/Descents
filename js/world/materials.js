@@ -41,8 +41,8 @@ export const M = {
 /**
  * Per material properties.
  * color: base sRGB colour (0..1)
- * flag: shader effect (0 none, 1 window glow at night, 2 lava veins, 3 crystal glow, 4 fungus glow,
- *       5 rock strata (assigned by the mesher), 6 glow lichen)
+ * flag: shader effect (0 none, 1 window glow at night, 2 lava veins (unused), 3 crystal glow, 4 fungus glow,
+ *       5 rock strata (assigned by the mesher; limestone beds in the Great Fault))
  * sound: footstep class
  * natural: natural terrain (side faces resolve to dirt/rock strata)
  * food: forage tags for herbivores/lithophages
@@ -74,7 +74,7 @@ def(M.WOOD, 'wood', [0.55, 0.4, 0.26], { sound: 'wood' });
 def(M.RUIN, 'ancient stone', [0.66, 0.66, 0.6], { sound: 'stone' });
 def(M.RUIN2, 'abyssal masonry', [0.42, 0.48, 0.46], { sound: 'stone' });
 def(M.STONEPLAIN, 'pale stone', [0.74, 0.71, 0.64], { sound: 'stone', natural: true, food: 'mineral' });
-def(M.BASALT, 'fault basalt', [0.17, 0.15, 0.16], { sound: 'stone', natural: true, flag: 2, food: 'mineral' });
+def(M.BASALT, 'fault granite', [0.47, 0.47, 0.48], { sound: 'stone', natural: true, food: 'mineral' });
 def(M.FIELD, 'crop field', [0.74, 0.66, 0.3], { sound: 'grass', natural: true, food: 'graze' });
 def(M.WINDOW, 'window', [0.2, 0.24, 0.3], { sound: 'stone', flag: 1, climb: 0.3 });
 def(M.DOOR, 'door', [0.33, 0.22, 0.14], { sound: 'wood' });
@@ -88,9 +88,9 @@ def(M.PATH, 'packed path', [0.6, 0.5, 0.36], { sound: 'dirt', natural: true });
 def(M.FUNGUS, 'glow fungus', [0.25, 0.4, 0.42], { sound: 'grass', natural: true, flag: 4, food: 'graze' });
 def(M.MEADOW, 'meadow', [0.48, 0.66, 0.26], { sound: 'grass', natural: true, food: 'graze' });
 def(M.SHAFTROCK, 'shaft rock', [0.42, 0.42, 0.42], { sound: 'stone', natural: true, food: 'mineral' });
-def(M.FAULTROCK, 'fault rock', [0.3, 0.24, 0.22], { sound: 'stone', natural: true, food: 'mineral' });
-def(M.LICHEN, 'glow lichen', [0.24, 0.34, 0.3], { sound: 'grass', natural: true, flag: 6, food: 'graze' });
-def(M.DEEPSTONE, 'abyssal limestone', [0.46, 0.5, 0.52], { sound: 'stone', natural: true, food: 'mineral' });
+def(M.FAULTROCK, 'fault limestone', [0.62, 0.6, 0.56], { sound: 'stone', natural: true, food: 'mineral' });
+def(M.LICHEN, 'cliff moss', [0.42, 0.5, 0.33], { sound: 'grass', natural: true, food: 'graze' });
+def(M.DEEPSTONE, 'abyssal limestone', [0.64, 0.65, 0.63], { sound: 'stone', natural: true, food: 'mineral' });
 def(M.NEST, 'woven nest', [0.46, 0.36, 0.24], { sound: 'wood' });
 
 export const MATERIAL_COUNT = MATERIALS.length;

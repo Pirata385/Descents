@@ -13,7 +13,7 @@ import { RNG } from '../core/rng.js';
 import { clamp, smoothstep, TAU, wrapAngle } from '../core/mathutil.js';
 import { CAVE_MAT } from './caves.js';
 import { M } from './materials.js';
-import { shelf, box, cyl, spire, dome, OP_ADD } from './structures.js';
+import { shelf, box, cyl, spire, dome, arch, OP_ADD } from './structures.js';
 import { ColumnData } from './column.js';
 
 const SLOPE = 0.31;        // design grade of descending passages
@@ -515,7 +515,7 @@ export function planFaultCaves(ctx) {
   const SINK_STYLES = ['traverse', 'switchback', 'corkscrew', 'traverse', 'switchback', 'corkscrew'];
   const addSink = (sk, nodes, hubIndex) => {
     const target = hubs[hubIndex];
-    const crater = { x: sk.x, y: sk.y - 2.6 + 0.55 * 7.5, z: sk.z, r: 7.5, fy: sk.y - 2.6 };
+    const crater = { x: sk.x, y: sk.y - 2.6 + 0.55 * 9, z: sk.z, r: 9, fy: sk.y - 2.6 };
     // the first nodes may lie above the plain floor: that is the open trench of the sinkhole
     sk.cave = makeCave('sinkhole', '', [crater, ...nodes.slice(1), hubNode(target)], { from: 'plain', to: `hall${hubIndex}` });
     sk.cave.sinkhole = true;
@@ -635,12 +635,14 @@ export function planFaultCaves(ctx) {
 
   // ------------------------------------------------------------ more sinkholes into the upper halls
   {
-    const want = rng.int(2, 4);
-    const upper = hubs.filter((h) => h.fy > c.yThroat - 140);
+    // plenty of ways in, spread around the tube, so whichever way the explorer
+    // crosses the plain one of them is close
+    const want = rng.int(5, 7);
+    const upper = hubs.filter((h) => h.fy > c.yThroat - 160);
     for (let ci = 0; ci < candidates.length && res.sinkholes.length < want && upper.length; ci++) {
       const sk = candidates[ci];
       if (sk.cave) continue;
-      if (res.sinkholes.some((o) => Math.abs(wrapAngle(o.phi - sk.phi)) < 0.9)) continue;
+      if (res.sinkholes.some((o) => Math.abs(wrapAngle(o.phi - sk.phi)) < 0.62)) continue;
       // nearest upper hall by angle
       const target = upper.slice().sort((a, b) => Math.abs(wrapAngle(a.phi - sk.phi)) - Math.abs(wrapAngle(b.phi - sk.phi)))[0];
       const nodes = sinkPassage(sk, target, RNG.derive(params.seed, 'sinkleg2', ci), SINK_STYLES);
@@ -652,6 +654,27 @@ export function planFaultCaves(ctx) {
   res.sinkholes.forEach((sk, i) => {
     sk.name = i === 0 ? `The ${names.name('sink', i)} Swallet` : `${names.name('sink', i)} ${['Sink', 'Hollow', 'Doline'][i % 3]}`;
     sk.cave.name = sk.name;
+    // delvers mark every way down: a pale stone arch over the mouth and a ring of
+    // standing stones, tall enough to be seen from across the plain
+    const nd = sk.cave.nodes;
+    const nx = nd.length > 2 ? nd[2] : nd[1];
+    let dx = nx.x - sk.x, dz = nx.z - sk.z;
+    const dl = Math.hypot(dx, dz) || 1;
+    dx /= dl; dz /= dl;
+    const px = -dz, pz = dx, rr = 9 + 3.5;
+    const mr = RNG.derive(params.seed, 'sinkmark', i);
+    const top = mr.range(8.5, 11);
+    res.prims.push(arch(sk.x + px * rr, sk.z + pz * rr, { bx: sk.x - px * rr, bz: sk.z - pz * rr, y0: sk.y - 1.5, yb: sk.y - 1.5, bulge: top, thick: mr.range(1.8, 2.4), width: mr.range(2.0, 2.6), top: M.RUIN, side: M.RUIN }));
+    const nStones = mr.int(6, 9);
+    for (let k = 0; k < nStones; k++) {
+      const a = Math.atan2(dz, dx) + (k + 0.5) / nStones * TAU;
+      // leave the way into the passage and the feet of the arch clear
+      const rel = Math.abs(wrapAngle(a - Math.atan2(dz, dx)));
+      if (rel < 0.65 || Math.abs(rel - Math.PI / 2) < 0.35) continue;
+      const sr = 9 + mr.range(5.5, 8);
+      const sx = sk.x + Math.cos(a) * sr, sz = sk.z + Math.sin(a) * sr;
+      res.prims.push(cyl(OP_ADD, sx, sz, { r: mr.range(0.6, 0.95), y0: sk.y - 1, y1: sk.y + mr.range(2.4, 4.6), top: M.RUIN, side: M.RUIN }));
+    }
   });
 
   // ------------------------------------------------------------ the basin, its exit and the Fourth Gate

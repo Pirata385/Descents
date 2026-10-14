@@ -13,10 +13,10 @@ import { Z_EYE, Z_BOWL, Z_CITY, Z_COUNTRY, Z_SEA } from './field.js';
 import { LAYER_BOUNDARIES } from './layers.js';
 import { SpatialGrid } from './spatial.js';
 
-// Layer 3 rock colours by depth: ember basalt, rust strata, pale abyssal limestone
-const L3_EMBER = [0.2, 0.165, 0.16];
-const L3_RUST = [0.37, 0.25, 0.19];
-const L3_DEEP = [0.4, 0.43, 0.46];
+// Layer 3 rock colours by depth: pale limestone, granite grey, cool abyssal limestone
+const L3_UPPER = [0.6, 0.58, 0.54];
+const L3_MID = [0.53, 0.53, 0.53];
+const L3_DEEP = [0.58, 0.6, 0.61];
 
 export const CHUNK = 32;
 const MARGIN = 1;
@@ -131,9 +131,9 @@ export class ChunkMesher {
     if (y > -60) base = pal[M.ROCK];
     else if (y > LAYER_BOUNDARIES.layer2Top) base = mixRGB(pal[M.ROCK], pal[M.SHAFTROCK], smoothstep(-60, LAYER_BOUNDARIES.layer2Top, y));
     else if (y > -870) base = mixRGB(pal[M.SHAFTROCK], pal[M.DARKROCK], smoothstep(-350, -700, y) * 0.6);
-    else if (y > -1200) base = mixRGB(pal[M.SHAFTROCK], L3_EMBER, smoothstep(-870, -960, y));
-    else if (y > -1600) base = mixRGB(L3_EMBER, L3_RUST, smoothstep(-1200, -1300, y));
-    else base = mixRGB(L3_RUST, L3_DEEP, smoothstep(-1600, -1720, y));
+    else if (y > -1200) base = mixRGB(pal[M.SHAFTROCK], L3_UPPER, smoothstep(-870, -930, y));
+    else if (y > -1600) base = mixRGB(L3_UPPER, L3_MID, smoothstep(-1200, -1300, y));
+    else base = mixRGB(L3_MID, L3_DEEP, smoothstep(-1600, -1720, y));
     const l = 0.97 + (h - 0.5) * 0.06;
     out[0] = base[0] * l; out[1] = base[1] * l; out[2] = base[2] * l;
     return out;
@@ -496,19 +496,19 @@ export class ChunkMesher {
               emitTemplate(buf, F.grass[Math.floor(r2 * F.grass.length)], xf, [0.9, 0.95, 0.8], ex, 1, 1);
             }
           } else if (mat === M.LICHEN || mat === M.FAULTROCK || mat === M.DEEPSTONE || mat === M.FUNGUS) {
-            // Layer 3 floors: glowing caps and stalagmite stubs in the caves, scree on the ledges
+            // Layer 3 floors: tufts of grass and moss on the open ledges, stalagmite stubs in the caves, scree
             const cave = (c.flags & CF.CAVE) !== 0;
-            if (r1 < (mat === M.LICHEN || mat === M.FUNGUS ? 0.09 : 0.025) * (lod1 ? 0.4 : 1)) {
-              xf.set(c.x + ox, top, c.z + oz, yaw, 1, 1, 1);
-              emitTemplate(buf, F.glowMush[Math.floor(r2 * F.glowMush.length)], xf, [1, 1, 1], Math.max(0.25, ex), 1, 1);
+            if (!cave && r1 < (mat === M.LICHEN ? 0.16 : 0.05) * (lod1 ? 0.4 : 1)) {
+              xf.set(c.x + ox, top, c.z + oz, yaw, 0.9, 0.55 + r3 * 0.5, 0.9);
+              emitTemplate(buf, F.grass[Math.floor(r2 * F.grass.length)], xf, mat === M.LICHEN ? [0.78, 0.92, 0.62] : [0.86, 0.9, 0.72], ex, 1, 1);
             } else if (r1 < 0.12 && cave && !lod1) {
               const s = 0.5 + r2 * 1.2;
-              xf.set(c.x + ox, top - 0.2, c.z + oz, yaw, s * 0.7, s * (1.4 + r3 * 1.6), s * 0.7);
-              emitTemplate(buf, F.rocks[Math.floor(r3 * F.rocks.length)], xf, mat === M.DEEPSTONE ? [1.1, 1.15, 1.2] : [0.9, 0.82, 0.78], ex, 1, 0);
+              xf.set(c.x + ox, top - 0.2, c.z + oz, yaw, s, s * (1.1 + r3 * 1.2), s);
+              emitTemplate(buf, F.stalagmites[Math.floor(r3 * F.stalagmites.length)], xf, mat === M.DEEPSTONE ? [0.98, 1.02, 1.05] : [1, 1, 1], ex, 1, 0);
             } else if (r1 < 0.15) {
               const s = 0.35 + r2 * 0.8;
               xf.set(c.x + ox, top - 0.15, c.z + oz, yaw, s, s * 0.7, s);
-              emitTemplate(buf, F.rocks[Math.floor(r3 * F.rocks.length)], xf, [0.85, 0.8, 0.78], ex, 1, 0);
+              emitTemplate(buf, F.paleRocks[Math.floor(r3 * F.paleRocks.length)], xf, [0.95, 0.95, 0.94], ex, 1, 0);
             }
           } else if (mat === M.CRYSTAL) {
             // nothing extra

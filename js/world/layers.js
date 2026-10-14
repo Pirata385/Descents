@@ -93,9 +93,9 @@ export const LAYERS = [
     yBottom: -1900,
     implemented: true,
     visuals: {
-      fogColor: [0.13, 0.1, 0.11], fogDensity: 0.0032,
-      skyTint: [0.5, 0.42, 0.42], ambient: [0.3, 0.24, 0.24], sun: [0.55, 0.42, 0.36],
-      particles: 'embers',
+      fogColor: [0.62, 0.67, 0.72], fogDensity: 0.0019,
+      skyTint: [0.75, 0.8, 0.86], ambient: [0.62, 0.66, 0.7], sun: [0.9, 0.9, 0.86],
+      particles: 'dust',
     },
     audio: { wind: 0.8, water: 0.35, birds: 0, city: 0, drips: 0.7, reverb: 0.7, music: 'fault' },
     ecology: {
@@ -105,7 +105,7 @@ export const LAYERS = [
     },
     artifacts: { count: 22, rarity: [0.18, 0.34, 0.3, 0.14, 0.04], categories: { relic: 3, unknown: 3, organic: 2, weapon: 1, ritual: 2, scientific: 2, equipment: 2, amulet: 1, mechanical: 1 } },
     vegetation: { grass: 0, flowers: 0, shrubs: 0.04, trees: 0, lichen: 1 },
-    traversal: 'A colossal chasm a kilometre deep. Sinkholes in the Stone Plain open into a cave network that winds down inside its walls, with windows onto the void.',
+    traversal: 'A colossal tube a kilometre deep with sheer pale walls. Sinkholes in the Stone Plain, marked by stone arches, open into a cave network that winds down inside its walls, with windows onto the void.',
   },
   {
     id: 'layer4',

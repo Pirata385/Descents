@@ -1,10 +1,10 @@
-// The Great Fault (Layer 3): a colossal chasm below the Stone Plain.
-// The fault mouth in the plain drops through a short throat into a dome that
-// opens into a ~1000 m deep chasm. Its walls step in tiers: where a tier is
-// narrower than the one above, a shelf forms; where it is wider, an overhang.
-// Its centre drifts with depth, the cross-section is elongated along the
-// fault axis, and below the tiers a funnel narrows to the flooded basin at the
-// entrance of Layer 4.
+// The Great Fault (Layer 3): a colossal tube sunk ~1000 m below the Stone Plain.
+// The round mouth in the plain leans out a little below its lip, then the
+// walls drop almost sheer. They step gently in tiers: where a tier is narrower
+// than the one above, a ledge forms; where it is wider, a slight overhang. The
+// tube wanders a little with depth and is nearly round, and below the tiers a
+// funnel narrows to the flooded basin at the entrance of Layer 4. Caves riddle
+// its walls (see faultcaves.js).
 //
 // The shape is a stack of 2 m rows. Each row stores a centre, a base radius,
 // an elongation and a blend of angular tables. A column is inside the chasm
@@ -23,34 +23,34 @@ const MAX_INT = 16;
 const SEG = 6;           // rows per skip segment
 
 /** Chasm parameters. Derived from their own stream so other params never shift. */
-export function makeChasmParams(seed, plainY) {
+export function makeChasmParams(seed, plainY, mouthR = 125) {
   const rng = RNG.derive(seed, 'chasm');
   const floorY = rng.range(-1962, -1944);
-  const yThroat = plainY - rng.range(58, 76);
-  const yWide = yThroat - rng.range(72, 95);
-  const Rw = rng.range(150, 182);
+  const yThroat = plainY - rng.range(14, 22);
+  const yWide = yThroat - rng.range(30, 44);
+  const Rw = mouthR * rng.range(1.08, 1.15);
   const yFunnel = floorY + rng.range(130, 160);
   const tiers = [];
   let y = yWide;
   let prevK = 1;
   while (y > yFunnel + 30) {
-    const h = rng.range(55, 115);
-    let k = rng.range(0.78, 1.06);
-    // keep consecutive tiers distinct so every transition makes a shelf or an overhang
-    if (Math.abs(k - prevK) < 0.07) k = clamp(prevK + (rng.chance(0.5) ? 0.12 : -0.12), 0.78, 1.06);
-    tiers.push({ yTop: y, yBot: Math.max(yFunnel, y - h), k, blend: rng.range(7, 14), table: 1 + (tiers.length % NT) });
+    const h = rng.range(60, 120);
+    let k = rng.range(0.93, 1.05);
+    // keep consecutive tiers a little apart so every transition makes a ledge or an overhang
+    if (Math.abs(k - prevK) < 0.035) k = clamp(prevK + (rng.chance(0.5) ? 0.05 : -0.05), 0.93, 1.05);
+    tiers.push({ yTop: y, yBot: Math.max(yFunnel, y - h), k, blend: rng.range(6, 12), table: 1 + (tiers.length % NT) });
     prevK = k;
     y -= h;
   }
   tiers[tiers.length - 1].yBot = yFunnel;
   return {
     floorY, yThroat, yWide, Rw, yFunnel, tiers,
-    ax: rng.range(1.15, 1.36),
+    ax: rng.range(1.0, 1.07),
     axis: rng.range(0, Math.PI),
-    basinR: rng.range(92, 118),
-    drift: rng.range(28, 46),
+    basinR: rng.range(92, 112),
+    drift: rng.range(6, 16),
     driftAngle: rng.range(0, TAU),
-    sway: rng.range(0.6, 1.3),
+    sway: rng.range(0.4, 0.9),
     seed: rng.int(1, 1e9),
   };
 }
@@ -93,8 +93,9 @@ export class Chasm {
       const T = new Float32Array(TABN + 1);
       for (let i = 0; i <= TABN; i++) {
         const th = (i / TABN) * TAU - Math.PI;
-        T[i] = 1 + 0.13 * angularNoise(n, th, 1.6, t * 11) + 0.07 * angularNoise(n, th, 3.9, t * 13 + 5)
-          + 0.03 * angularNoise(n, th, 9.5, t * 17 + 9) + 0.014 * angularNoise(n, th, 23, t * 19 + 3);
+        // nearly round, with buttresses and recesses rather than lobes
+        T[i] = 1 + 0.035 * angularNoise(n, th, 1.6, t * 11) + 0.03 * angularNoise(n, th, 3.9, t * 13 + 5)
+          + 0.022 * angularNoise(n, th, 9.5, t * 17 + 9) + 0.012 * angularNoise(n, th, 23, t * 19 + 3);
         maxT = Math.max(maxT, T[i]);
       }
       this.tabs.push(T);
@@ -105,7 +106,7 @@ export class Chasm {
 
     const nS = new Simplex(hash32(c.seed, 5));
     const dA = c.driftAngle;
-    const rT = f.r * 1.18;
+    const rT = f.r * 1.04;
     const tiers = c.tiers;
     const last = tiers[tiers.length - 1];
     let bound = 0;
@@ -115,14 +116,14 @@ export class Chasm {
       let R, ax = 1, ta = 0, tb = 0, tw = 0, wamp = 0;
       if (y >= c.yThroat) {
         // mouth and throat: the plain hole, leaning outward a little below the lip
-        R = f.r * (1 + 0.18 * smoothstep(params.plainY - 5, c.yThroat, y));
+        R = f.r * (1 + 0.04 * smoothstep(params.plainY - 5, c.yThroat, y));
       } else if (y >= c.yWide) {
         const s = (c.yThroat - y) / (c.yThroat - c.yWide);
         const q = Math.sqrt(Math.max(0, 1 - (1 - s) * (1 - s)));
         R = rT + (c.Rw * tiers[0].k - rT) * q;
         ax = 1 + (c.ax - 1) * q;
         ta = 0; tb = tiers[0].table; tw = smoothstep(0, 0.8, s);
-        wamp = 0.05 * q;
+        wamp = 0.03 * q;
       } else if (y >= c.yFunnel) {
         let i = 0;
         while (i < tiers.length - 1 && y < tiers[i].yBot) i++;
@@ -134,7 +135,7 @@ export class Chasm {
         ax = c.ax;
         ta = prev ? prev.table : T.table; tb = T.table;
         tw = prev ? smoothstep(T.yTop + 8, T.yTop - (T.yTop - T.yBot) * 0.6, y) : 1;
-        wamp = 0.05;
+        wamp = 0.03;
       } else if (y >= c.floorY + 6) {
         const s = (c.yFunnel - y) / (c.yFunnel - c.floorY - 6);
         const e = 1 - Math.pow(1 - s, 1.6);

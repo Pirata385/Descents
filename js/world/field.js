@@ -55,7 +55,7 @@ export class TerrainField {
       this.cityTab[i] = params.cityDepth * (1 + 0.18 * angularNoise(n, th, 2.4, 19));
       this.cliffTab[i] = 7 + 5 * (0.5 + 0.5 * angularNoise(n, th, 7.0, 23));
       this.bellTab[i] = params.bellR * (1 + 0.08 * angularNoise(n, th, 2.2, 29) + 0.04 * angularNoise(n, th, 6.5, 31));
-      this.faultTab[i] = params.fault.r * (1 + 0.12 * angularNoise(n, th, 1.9, 37) + 0.06 * angularNoise(n, th, 5.7, 41));
+      this.faultTab[i] = params.fault.r * (1 + 0.035 * angularNoise(n, th, 1.9, 37) + 0.02 * angularNoise(n, th, 5.7, 41) + 0.008 * angularNoise(n, th, 14, 43));
       params.galleries.forEach((g, k) => {
         const v = angularNoise(this.nGal, th, 2.6, 43 + k * 7) * 0.75 + angularNoise(this.nGal, th, 9.0, 47 + k * 5) * 0.35;
         const open = v + g.open;
