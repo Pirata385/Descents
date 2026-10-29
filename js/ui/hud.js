@@ -161,6 +161,13 @@ export class HUD {
     };
     // the Eye is always felt
     if (Math.hypot(pos.x, pos.z) > 40) addMarker(0, 0, 'eye', Math.hypot(pos.x, pos.z) < 600 ? '' : 'the Eye');
+    // on the Stone Plain the delvers' charts point to the nearest way down into the Great Fault
+    const F = g.plan.fault;
+    if (F && F.sinkholes && F.sinkholes.length && Math.abs(pos.y - g.plan.params.plainY) < 60) {
+      let best = null, bd = Infinity;
+      for (const sk of F.sinkholes) { const d = Math.hypot(sk.x - pos.x, sk.z - pos.z); if (d < bd) { bd = d; best = sk; } }
+      if (best && bd > 14) addMarker(best.x, best.z, 'down', `Way down · ${Math.round(bd)} m`);
+    }
     // nearby discovered landmarks
     let n = 0;
     for (const lm of g.plan.landmarks) {

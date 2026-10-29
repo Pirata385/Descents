@@ -131,6 +131,7 @@ export class Game {
     this.chunks.update(focus);
     await new Promise((resolve) => {
       const tick = () => {
+        this.chunks.pump(Infinity);
         this.chunks.update(this.focusPoint());
         const near = this.chunks.nearReady(160);
         this.progress('Charting the surroundings', 0.7 + near * 0.3);
@@ -139,10 +140,21 @@ export class Game {
       };
       tick();
     });
+    // compile every shader now (in parallel where the browser can), not mid-play when
+    // the first creature, splash or effect appears
+    this.progress('Preparing the light', 0.99);
+    await this.renderer.warmup(this.warmupObjects || []);
+    this.warmupObjects = null;
     this.running = true;
     this.last = performance.now();
     this.chunkTimer = 0;
     this.schedule();
+  }
+
+  /** Bytes of new geometry sent to the GPU per frame (less on slower settings). */
+  uploadBudget() {
+    const q = this.settings.quality;
+    return q === 'low' ? 0.6e6 : q === 'medium' ? 1.0e6 : 1.8e6;
   }
 
   focusPoint() {
@@ -172,8 +184,10 @@ export class Game {
     this.timeOfDay = (this.timeOfDay + dt / 60) % 24; // one game hour per real minute
     for (const s of this.systems) if (s.update) s.update(dt);
     this.chunkTimer -= dt;
-    if (this.chunkTimer <= 0) {
-      this.chunkTimer = 0.25;
+    // new chunk meshes go up to the GPU within a budget per frame
+    const fresh = this.chunks.pump(this.uploadBudget());
+    if (this.chunkTimer <= 0 || fresh) {
+      if (this.chunkTimer <= 0) this.chunkTimer = 0.25;
       this.chunks.update(this.focusPoint());
     }
     const p = this.focusPoint();
@@ -191,7 +205,8 @@ export class Game {
 /** Draw the world without advancing the simulation (waiting screens, after a resize). */
 Game.prototype.renderOnly = function renderOnly(dt) {
   this.chunkTimer -= dt;
-  if (this.chunkTimer <= 0) { this.chunkTimer = 0.25; this.chunks.update(this.focusPoint()); }
+  const fresh = this.chunks.pump(this.uploadBudget());
+  if (this.chunkTimer <= 0 || fresh) { if (this.chunkTimer <= 0) this.chunkTimer = 0.25; this.chunks.update(this.focusPoint()); }
   const p = this.focusPoint();
   const info = this.world.info(p.x, p.y, p.z);
   this.renderer.update(dt, p, { layer: info.layer, zone: info.zone, y: p.y, enclosed: this.envEnclosed ?? 0, timeOfDay: this.timeOfDay });

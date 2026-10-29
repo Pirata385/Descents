@@ -4,7 +4,7 @@
 // ranges of its family, so individuals of one species differ in build,
 // ornament and colour while staying recognisably the same animal.
 import { clamp, lerp, hsl2rgb } from '../core/mathutil.js';
-import { G, ALLELES } from './genome.js';
+import { G, NG, ALLELES } from './genome.js';
 
 const R = (g, a, b) => a + (b - a) * g;
 
@@ -22,12 +22,25 @@ const PROP = {
   centipede: { girth: [0.08, 0.12], height: [0.05, 0.08], neck: [0.0, 0.03], head: [0.1, 0.14], snout: [0.05, 0.12], leg: [0.12, 0.22], legThick: [0.012, 0.02], tail: [0, 0], tailThick: [0, 0] },
   golem: { girth: [0.26, 0.4], height: [0.26, 0.4], neck: [0.0, 0.12], head: [0.18, 0.28], snout: [0.1, 0.35], leg: [0.25, 0.5], legThick: [0.08, 0.15], tail: [0.1, 0.6], tailThick: [0.08, 0.14] },
   roller: { girth: [0.4, 0.5], height: [0.4, 0.5], neck: [0, 0], head: [0.2, 0.26], snout: [0.05, 0.15], leg: [0, 0], legThick: [0, 0], tail: [0, 0], tailThick: [0, 0] },
+  hexapod: { girth: [0.16, 0.28], height: [0.16, 0.28], neck: [0.1, 0.45], head: [0.18, 0.3], snout: [0.2, 0.7], leg: [0.3, 0.7], legThick: [0.045, 0.09], tail: [0.1, 0.8], tailThick: [0.04, 0.1] },
+  strider: { girth: [0.14, 0.22], height: [0.14, 0.22], neck: [0.35, 0.95], head: [0.15, 0.24], snout: [0.3, 0.9], leg: [0.95, 1.55], legThick: [0.028, 0.05], tail: [0.05, 0.5], tailThick: [0.03, 0.06] },
+  hopper: { girth: [0.22, 0.34], height: [0.2, 0.3], neck: [0, 0.08], head: [0.22, 0.32], snout: [0.05, 0.3], leg: [0.4, 0.8], legThick: [0.04, 0.07], tail: [0, 0.3], tailThick: [0.04, 0.08] },
+  crab: { girth: [0.3, 0.45], height: [0.12, 0.2], neck: [0, 0.02], head: [0.14, 0.2], snout: [0.02, 0.08], leg: [0.45, 0.85], legThick: [0.022, 0.04], tail: [0, 0], tailThick: [0, 0] },
+  slug: { girth: [0.12, 0.2], height: [0.1, 0.18], neck: [0.05, 0.2], head: [0.15, 0.24], snout: [0.05, 0.2], leg: [0, 0], legThick: [0, 0], tail: [0.35, 0.8], tailThick: [0.06, 0.12] },
+  floater: { girth: [0.36, 0.5], height: [0.3, 0.46], neck: [0, 0], head: [0.2, 0.3], snout: [0, 0.1], leg: [0, 0], legThick: [0, 0], tail: [0, 0], tailThick: [0, 0] },
 };
+
+// mouth, eyes and feet of a family when the genome does not say (older genomes)
+const DEFAULT_MOUTH = { mammal: 'muzzle', reptile: 'muzzle', bird: 'beak', amphibian: 'grin', arthropod: 'mandibles', mollusc: 'sucker', medusoid: 'sucker', lithosere: 'grin' };
+const DEFAULT_EYES = { mammal: 'socket', reptile: 'socket', bird: 'socket', amphibian: 'top', arthropod: 'bulge', mollusc: 'stalk', medusoid: 'bulge', lithosere: 'socket' };
+const DEFAULT_FEET = { mammal: 'paw', reptile: 'claw', bird: 'talon', amphibian: 'pad', arthropod: 'none', mollusc: 'none', medusoid: 'none', lithosere: 'paw' };
 
 function rgbOf(h, s, l) { return hsl2rgb(((h % 1) + 1) % 1, clamp(s, 0, 1), clamp(l, 0.04, 0.95)); }
 
 export function phenotype(sp, genes) {
-  const c = genes.c, a = genes.a;
+  // genes added in later versions read as average in older genomes
+  const c = genes.c.length >= NG ? genes.c : genes.c.concat(new Array(NG - genes.c.length).fill(0.5));
+  const a = genes.a;
   const plan = sp.plan, fam = sp.family;
   const P = PROP[plan];
   const juvenile = false;
@@ -65,7 +78,34 @@ export function phenotype(sp, genes) {
     },
     arms: { len: plan === 'biped' ? R(c[G.armLen], 0.12, 0.45) : 0 },
     wings: { type: wingType(plan, fam), span: R(c[G.wingSpan], 1.4, 3.0), chord: R(c[G.wingChord], 0.25, 0.6) },
+    // Spore-like build: where the mass sits, how round and baby-faced the animal is
+    shape: {
+      chest: R(c[G.chestMass], -1, 1),          // -1 heavy hindquarters .. +1 heavy chest and shoulders
+      belly: R(c[G.bellyRound], 0, 1),
+      cute: R(c[G.cute], 0, 1),                  // neoteny: big round head and eyes, short snout
+      headLong: R(c[G.headLong], 0, 1),
+      limbChunk: R(c[G.limbChunk], 0.75, 1.5),
+    },
+    mouth: { type: a.mouth || DEFAULT_MOUTH[fam], width: R(c[G.mouthW], 0.55, 1.35) },
+    tentacles: { n: plan === 'floater' ? Math.round(R(c[G.tentacles], 4, 9)) : fam === 'mollusc' ? 2 : 0, len: R(c[G.tentacles], 0.5, 1.6) },
+    shell: { size: fam === 'mollusc' ? (c[G.shellSize] > 0.4 ? R(c[G.shellSize], 0.35, 0.75) : 0) : 0, whorl: R(c[G.hornCurve], 2.2, 3.6) },
+    personality: {
+      bold: c[G.boldness], curious: c[G.curiosity], social: c[G.sociality], aggr: c[G.aggression],
+      playful: c[G.playful], bounce: c[G.bounce], energy: c[G.agility],
+    },
   };
+  ph.eyes.style = a.eyeStyle || DEFAULT_EYES[fam];
+  if (ph.eyes.style === 'cyclops') ph.eyes.count = 1;
+  if (ph.eyes.count === 1 && ph.eyes.style !== 'cyclops' && ph.eyes.style !== 'stalk') ph.eyes.style = 'cyclops';
+  ph.eyes.pos = c[G.eyePos];
+  ph.legs.feet = a.feet || DEFAULT_FEET[fam];
+  if (plan === 'hopper') { ph.legs.posture = 'hop'; ph.legs.biped = false; }
+  if (plan === 'crab') ph.legs.posture = 'arthropod';
+  // neoteny: a round head, big eyes and a short face make an animal look young and friendly
+  const cute = ph.shape.cute;
+  ph.head.size *= 1 + 0.35 * cute;
+  ph.eyes.size *= 1 + 0.55 * cute;
+  ph.head.snout *= 1 - 0.35 * cute;
   if (plan === 'avian' && sp.behavior.locomotion === 'walk') { ph.wings.span *= 0.45; }
   // gliding patagium spans the limbs
   if (plan === 'glider') ph.wings.span = R(c[G.wingSpan], 0.9, 1.6);
@@ -93,10 +133,13 @@ export function phenotype(sp, genes) {
   let walk = clamp(0.45 + legM * 1.4, 0.3, 2.6), run = walk * R(speedG, 2.2, 4.0);
   if (fam === 'lithosere') { walk *= 0.6; run *= 0.55; }
   if (plan === 'sprawler' || plan === 'serpent') run *= 1.15;
-  const flier = ph.wings.type === 'feather' || ph.wings.type === 'membrane' || ph.wings.type === 'insect';
+  if (plan === 'slug') { walk = clamp(0.12 + scale * 0.15, 0.1, 0.4); run = walk * 1.6; }
+  if (plan === 'floater') { walk = clamp(0.4 + scale * 0.3, 0.4, 1.2); run = walk * 1.8; }
+  if (plan === 'crab') run *= 1.2;
+  const flier = ph.wings.type === 'feather' || ph.wings.type === 'membrane' || ph.wings.type === 'insect' || plan === 'floater';
   ph.stats = {
     walk, run,
-    fly: flier ? clamp(3 + scale * 2.5, 3, 12) * R(speedG, 0.85, 1.35) : 0,
+    fly: plan === 'floater' ? clamp(0.8 + scale * 0.5, 0.8, 2.2) : flier ? clamp(3 + scale * 2.5, 3, 12) * R(speedG, 0.85, 1.35) : 0,
     climb: plan === 'sprawler' || plan === 'glider' || plan === 'spider' || plan === 'insect' || plan === 'centipede' ? R(c[G.footSize], 0.5, 1) : 0,
     agility,
     perception: clamp(10 + scale * 6 + ph.eyes.size * 70 + (ph.ears.size || 0) * 20, 8, 70),
@@ -106,7 +149,7 @@ export function phenotype(sp, genes) {
   return ph;
 }
 
-const planPosture = { biped: 'digitigrade', avian: 'digitigrade', sprawler: 'sprawl', glider: 'sprawl', bat: 'sprawl', insect: 'arthropod', spider: 'arthropod', centipede: 'arthropod', golem: 'erect' };
+const planPosture = { biped: 'digitigrade', avian: 'digitigrade', sprawler: 'sprawl', glider: 'sprawl', bat: 'sprawl', insect: 'arthropod', spider: 'arthropod', centipede: 'arthropod', crab: 'arthropod', golem: 'erect', hexapod: 'erect', strider: 'erect', hopper: 'hop' };
 
 function wingType(plan, fam) {
   if (plan === 'avian') return 'feather';
@@ -122,6 +165,7 @@ export function juvenilize(ph, t) {
   ph.head.size *= 1 + 0.45 * k;
   ph.eyes.size *= 1 + 0.5 * k;
   ph.legs.len *= 1 - 0.15 * k;
+  ph.shape.cute = Math.min(1, ph.shape.cute + 0.5 * k);
   ph.horns.len *= 1 - 0.85 * k;
   ph.crest.size *= 1 - 0.7 * k;
   ph.spikes.len *= 1 - 0.7 * k;

@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { test, assert, note } from './lib.js';
 import { generateSpecies, individualGenes, inheritGenes, FAMILIES, G, GENES } from '../js/creatures/genome.js';
 import { phenotype, typicalPhenotype } from '../js/creatures/anatomy.js';
-import { buildCreature } from '../js/creatures/bodyMesh.js';
+import { buildCreature } from '../js/creatures/body.js';
 import { Animator } from '../js/creatures/motion.js';
 import { Ecosystem } from '../js/creatures/ecosystem.js';
 import { BAND } from '../js/creatures/habitat.js';

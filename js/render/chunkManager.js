@@ -37,6 +37,7 @@ export class ChunkManager {
     this.waterMat = makeWaterMaterial();
     this.fallMat = makeFallMaterial();
     this.cacheLimit = 360;
+    this.showUpper = true; this.showDeep = false;
     this.stats = { built: 0, ms: 0, tris: 0, visible: 0, pending: 0 };
     for (let i = 0; i < workers.length; i++) {
       workers[i].busy = false;
@@ -86,6 +87,9 @@ export class ChunkManager {
   }
 
   update(camPos) {
+    this.lastFocus = camPos;
+    // Layer 4 lies below the split; it shows from the bottom of the Great Fault down
+    this.setBands(camPos.y > -2012, camPos.y < -1930);
     const leaves = this.select(camPos.x, camPos.z);
     this.desired = leaves;
     const now = performance.now();
@@ -163,7 +167,10 @@ export class ChunkManager {
     if (msg.type === 'chunk') {
       this.workers[wi].busy = false;
       this.inFlight.delete(msg.key);
-      this.buildNode(msg.key, msg.out);
+      // collision data is needed at once; the meshes go up to the GPU a few at a time (see pump)
+      const o = msg.out;
+      if (o.L === 0 && o.spans) { this.world.addChunkData(o.cq, o.cr, o.spans, o.colliders); o.spansDone = true; }
+      (this.arrived || (this.arrived = [])).push([msg.key, o]);
       this.dispatch();
     } else if (msg.type === 'error') {
       this.workers[wi].busy = false;
@@ -181,7 +188,8 @@ export class ChunkManager {
     g.setAttribute('aLight', new THREE.BufferAttribute(m.lit, 4, true));
     if (sway && m.sway) g.setAttribute('aSway', new THREE.BufferAttribute(m.sway, 1, true));
     g.setIndex(new THREE.BufferAttribute(m.idx, 1));
-    g.computeBoundingSphere();
+    if (m.bs) g.boundingSphere = new THREE.Sphere(new THREE.Vector3(m.bs[0], m.bs[1], m.bs[2]), m.bs[3]);
+    else g.computeBoundingSphere();
     return g;
   }
 
@@ -192,39 +200,78 @@ export class ChunkManager {
     const group = new THREE.Group();
     group.visible = false;
     let tris = 0;
-    if (out.terrain) {
-      const mesh = new THREE.Mesh(this.makeGeometry(out.terrain), this.terrainMats[L]);
-      mesh.receiveShadow = L <= 2;
-      mesh.castShadow = L <= 1;
-      group.add(mesh);
-      tris += out.terrain.idx.length / 3;
-    }
-    if (out.foliage) {
-      const mesh = new THREE.Mesh(this.makeGeometry(out.foliage, true), this.foliageMat);
-      mesh.receiveShadow = L === 0;
-      mesh.castShadow = false;
-      group.add(mesh);
-      tris += out.foliage.idx.length / 3;
-    }
-    if (out.water) {
-      const mesh = new THREE.Mesh(this.makeGeometry(out.water), this.waterMat);
-      mesh.renderOrder = 2;
-      group.add(mesh);
-    }
-    if (out.falls) {
-      const mesh = new THREE.Mesh(this.makeGeometry(out.falls), this.fallMat);
-      mesh.renderOrder = 3;
-      group.add(mesh);
+    // each kind of mesh, for the upper world and for the deep (Layer 4) band
+    for (const deep of [false, true]) {
+      const sfx = deep ? 'Deep' : '';
+      const show = deep ? this.showDeep : this.showUpper;
+      const T = out['terrain' + sfx], F = out['foliage' + sfx], Wt = out['water' + sfx], Fa = out['falls' + sfx];
+      if (T) {
+        const mesh = new THREE.Mesh(this.makeGeometry(T), this.terrainMats[L]);
+        mesh.receiveShadow = L <= 2;
+        mesh.castShadow = L <= 1 && !deep;
+        mesh.userData.deep = deep; mesh.visible = show;
+        group.add(mesh);
+        tris += T.idx.length / 3;
+      }
+      if (F) {
+        const mesh = new THREE.Mesh(this.makeGeometry(F, true), this.foliageMat);
+        mesh.receiveShadow = L === 0;
+        mesh.castShadow = false;
+        mesh.userData.deep = deep; mesh.visible = show;
+        group.add(mesh);
+        tris += F.idx.length / 3;
+      }
+      if (Wt) {
+        const mesh = new THREE.Mesh(this.makeGeometry(Wt), this.waterMat);
+        mesh.renderOrder = 2;
+        mesh.userData.deep = deep; mesh.visible = show;
+        group.add(mesh);
+      }
+      if (Fa) {
+        const mesh = new THREE.Mesh(this.makeGeometry(Fa), this.fallMat);
+        mesh.renderOrder = 3;
+        mesh.userData.deep = deep; mesh.visible = show;
+        group.add(mesh);
+      }
     }
     node.group = group;
     node.tris = tris;
     node.ready = true;
     node.lastUsed = performance.now();
     this.group.add(group);
-    if (L === 0 && out.spans) this.world.addChunkData(cq, cr, out.spans, out.colliders);
+    if (L === 0 && out.spans && !out.spansDone) this.world.addChunkData(cq, cr, out.spans, out.colliders);
     this.stats.built++;
     this.stats.ms += out.ms || 0;
     if (this.onChunkLoaded) this.onChunkLoaded(node, out);
+  }
+
+  /**
+   * Turn arrived chunk meshes into scene objects within a byte budget per frame:
+   * each new mesh is uploaded to the GPU when first drawn, and dozens arriving
+   * together made a visible stall on slow devices. Returns true when something
+   * new can be shown (the caller then refreshes the visible set).
+   */
+  pump(budgetBytes = 1.5e6) {
+    if (!this.arrived || !this.arrived.length) return false;
+    let used = 0, n = 0;
+    // nearest first: the arrival list is short, a sort is cheap
+    if (this.arrived.length > 1 && this.lastFocus) {
+      const f = this.lastFocus;
+      this.arrived.sort((a, b) => this.nodeDist(a[1], f) - this.nodeDist(b[1], f));
+    }
+    while (this.arrived.length && (n === 0 || used < budgetBytes)) {
+      const [key, out] = this.arrived.shift();
+      for (const k of ['terrain', 'foliage', 'water', 'falls', 'terrainDeep', 'foliageDeep', 'waterDeep', 'fallsDeep']) if (out[k]) used += out[k].pos.byteLength * 2 + out[k].idx.byteLength;
+      this.buildNode(key, out);
+      n++;
+    }
+    return n > 0;
+  }
+
+  nodeDist(out, f) {
+    const m = out.terrain || out.terrainDeep || out.foliage || out.water || out.falls;
+    if (!m || !m.bs) return 0;
+    return (m.bs[0] - f.x) ** 2 + (m.bs[2] - f.z) ** 2;
   }
 
   evict() {
@@ -247,6 +294,20 @@ export class ChunkManager {
   }
 
   setQuality(q) { this.quality = q; }
+
+  /**
+   * Which height bands are drawn: the upper world (surface to Layer 3) and the
+   * deep band (Layer 4). Nothing of one can be seen from deep inside the other,
+   * so hiding it saves the GPU most of the world.
+   */
+  setBands(showUpper, showDeep) {
+    if (showUpper === this.showUpper && showDeep === this.showDeep) return;
+    this.showUpper = showUpper; this.showDeep = showDeep;
+    for (const n of this.nodes.values()) {
+      if (!n.group) continue;
+      for (const m of n.group.children) m.visible = m.userData.deep ? showDeep : showUpper;
+    }
+  }
 
   setRenderDistance(chunks) { this.renderRadius = chunks * CHUNK; }
 

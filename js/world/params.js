@@ -9,7 +9,7 @@ import { makeChasmParams } from './chasm.js';
 
 export const WORLD_HALF_X = 1500;      // 3000 hex columns wide (1 m per column)
 export const WORLD_HALF_Z = 1299;      // 3000 hex rows (0.866 m per row)
-export const BOTTOM_Y = -2060;
+export const BOTTOM_Y = -2400;
 export const SEA_Y = -26;
 
 const ROOF_PALETTES = [
@@ -90,7 +90,7 @@ export function makeParams(seed) {
 
   return {
     seed,
-    version: 3,
+    version: 4,
     worldHalfX: WORLD_HALF_X,
     worldHalfZ: WORLD_HALF_Z,
     bottomY: BOTTOM_Y,

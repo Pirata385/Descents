@@ -41,7 +41,7 @@ await page.evaluate(() => {
     p.yaw = Math.atan2(-(x - e.x), -(z - e.z));
     p.pitch = Math.atan2(y - e.y, Math.hypot(x - e.x, z - e.z));
   };
-  window.__settle = async () => { for (let i = 0; i < 40; i++) { g.chunks.update(g.player.pos); if (g.chunks.nearReady(120) > 0.99) break; await new Promise((r) => setTimeout(r, 250)); } };
+  window.__settle = async () => { for (let i = 0; i < 40; i++) { g.chunks.pump(Infinity); g.chunks.update(g.player.pos); if (g.chunks.nearReady(120) > 0.99) break; await new Promise((r) => setTimeout(r, 250)); } };
 });
 const step = (n, keys) => page.evaluate(([n2, k]) => window.__step(n2, 1 / 30, k), [n, keys || []]);
 const render = () => page.evaluate(() => { const g = window.__descents; g.renderer.render(); });

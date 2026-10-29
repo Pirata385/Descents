@@ -7,6 +7,7 @@
 // the plan validator.
 import { TerrainField, Z_EYE, Z_BOWL, Z_CITY, Z_COUNTRY, Z_SEA } from './field.js';
 import { Chasm } from './chasm.js';
+import { Layer4, L4_BOTTOM } from './goblets.js';
 import { SpatialGrid } from './spatial.js';
 import { M } from './materials.js';
 import { PK, OP_ADD, OP_CARVE } from './structures.js';
@@ -16,13 +17,13 @@ import { hash32 } from '../core/rng.js';
 import { clamp, clamp01, smoothstep, wrapAngle } from '../core/mathutil.js';
 
 export const MAX_SPANS = 32;
-export const BOTTOM = -2060;
+export const BOTTOM = L4_BOTTOM;
 export const RT = { ROAD: 1, STREET: 2, TRAIL: 3, LEDGE: 4, TUNNEL: 5, STAIR: 6 };
 
 // column flags
 export const CF = {
   GALLERY0: 1, GALLERY1: 2, GALLERY2: 4, BELL: 8, FAULT: 16, CAVE: 32, ROUTE: 64, RIVER: 128,
-  LAKE: 256, BUILDING: 512, PARK: 1024, FIELD: 2048, SHORE: 4096, SEA: 8192, POOL: 16384,
+  LAKE: 256, BUILDING: 512, PARK: 1024, FIELD: 2048, SHORE: 4096, SEA: 8192, POOL: 16384, L4: 32768,
 };
 
 export class ColumnData {
@@ -183,6 +184,7 @@ export class ColumnGen {
     this.p = plan.params;
     this.field = new TerrainField(plan.params);
     this.chasm = new Chasm(plan.params, this.field);
+    this.l4 = new Layer4(plan.layer4 || null);
     this.plainY = plan.params.plainY;
     this.P = {}; this.S = {}; this.FP = {}; this.LK = {}; this.W = {};
     this.buildIndexes();
@@ -338,6 +340,7 @@ export class ColumnGen {
     }
 
     this.deepCarve(x, z, P, lod, col);
+    if (this.l4.near(x, z)) this.l4.apply(x, z, col, CF.L4);
     this.caveCarve(x, z, lod, col);
     this.water(x, z, P, lod, col);
     if (prims.length) this.applyPrims(prims, x, z, lod, col);
@@ -442,6 +445,8 @@ export class ColumnGen {
         let fm, cm = M.FAULTROCK;
         if (mc === 1) fm = v > 0.62 ? M.LICHEN : v > 0.05 ? M.FAULTROCK : M.GRAVEL;
         else if (mc === 2) fm = v > 0.45 ? M.FUNGUS : v > -0.2 ? M.DIRT : M.LITTER;
+        // the way in from the plain: a trail worn by delvers' boots
+        else if (mc === 4) fm = v > 0.7 ? M.GRAVEL : M.PATH;
         else { fm = v > 0.5 ? M.LICHEN : M.DEEPSTONE; cm = M.DEEPSTONE; }
         col.carve(cy - half * 0.55, cy + half, fm, cm, 0.05);
       }

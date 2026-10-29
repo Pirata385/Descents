@@ -161,6 +161,13 @@ ${COMMON_PARS}`)
       totalEmissiveRadiance += vec3(1.0, 0.32, 0.08) * vein * (1.6 + 0.6 * sin(uTime * 0.8 + vWPos.y * 0.2));
     } else if (abs(flag - 3.0) < 0.5) totalEmissiveRadiance += diffuseColor.rgb * (0.5 + 0.25 * sin(uTime * 1.3 + vWPos.x)) * (0.4 + emi);
     else if (abs(flag - 4.0) < 0.5) totalEmissiveRadiance += vec3(0.25, 0.9, 0.8) * 0.35 * smoothstep(0.6, 0.9, dNoise(vWPos * 2.0));
+    else if (abs(flag - 6.0) < 0.5) {
+      // the bark of the goblets: glowing cyan spots and faint veins that breathe slowly
+      float sp = smoothstep(0.74, 0.84, dNoise(vWPos * vec3(0.55, 0.3, 0.55)));
+      float v = dNoise(vWPos * vec3(0.12, 0.05, 0.12));
+      float vein = smoothstep(0.47, 0.5, v) * (1.0 - smoothstep(0.5, 0.53, v));
+      totalEmissiveRadiance += vec3(0.25, 0.85, 1.0) * (sp * 0.85 + vein * 0.35) * (0.7 + 0.3 * sin(uTime * 0.9 + vWPos.y * 0.15));
+    }
     else if (emi > 0.01) totalEmissiveRadiance += diffuseColor.rgb * emi * 1.4;
   }`);
 }

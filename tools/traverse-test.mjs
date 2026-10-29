@@ -88,7 +88,7 @@ await page.evaluate(() => {
       for (const k of keys) g.input.down.delete(k);
       t += dt;
       if (p.mode === 'dead') { for (let i = 0; i < 120 && p.mode === 'dead'; i++) { g.update(dt); g.input.endFrame(); } }
-      if (t > 20 && t % 10 < dt) g.chunks.update(p.pos);
+      if (t > 20 && t % 10 < dt) { g.chunks.pump(Infinity); g.chunks.update(p.pos); }
     }
     let len = 0;
     for (let k = 1; k < n; k++) len += Math.hypot(pts[k * 3] - pts[k * 3 - 3], pts[k * 3 + 2] - pts[k * 3 - 1]);
@@ -194,7 +194,7 @@ for (const name of routes) {
   if (!pass) ok = false;
   console.log(`${pass ? 'OK  ' : 'FAIL'} ${JSON.stringify(res)}`);
 }
-if (process.env.CAVES !== '0' && !only) {
+if (process.env.CAVES !== '0' && !only && process.env.L4 !== 'only') {
   const legs = await page.evaluate(() => window.__caveLegs.map((l) => l.name));
   console.log(`The Great Fault: ${legs.length} passages from the plain to the Fourth Gate`);
   let keep = false;
@@ -211,6 +211,59 @@ if (process.env.CAVES !== '0' && !only) {
   }
   const end = await page.evaluate(() => { const p = window.__descents.player.pos; return { y: Math.round(p.y), layer: window.__descents.layerInfo.layer }; });
   console.log(`reached depth ${-end.y} m (layer ${end.layer}) after starting the caves at ${-drop} m`);
+}
+// Layer 4: around the rims and across the root bridges, from the Gate Stair down to the mere
+if (process.env.CAVES !== '0' && !only && process.env.L4 !== '0') {
+  const legs = await page.evaluate(() => {
+    const g = window.__descents, d = g.plan.layer4, W = g.world;
+    if (!d) return [];
+    const G = d.goblets;
+    const out = [];
+    const floorAt = (x, y, z) => { const f = W.floorBelow(x, y + 1.2, z); return Number.isFinite(f) && y - f < 6 ? f : y; };
+    // the arc along a rim between two angles, the way that avoids the notch
+    const arc = (gb, a1, a2, pts) => {
+      const r = gb.Rc - gb.rimW * 0.5;
+      let da = Math.atan2(Math.sin(a2 - a1), Math.cos(a2 - a1));
+      const notchIn = (from, span) => { const n = Math.ceil(Math.abs(span) / 0.05); for (let k = 0; k <= n; k++) { const a = from + (span * k) / n; if (Math.abs(Math.atan2(Math.sin(a - gb.notch.ang), Math.cos(a - gb.notch.ang))) < gb.notch.hw + 0.12) return true; } return false; };
+      if (gb.notch && notchIn(a1, da)) da = da > 0 ? da - Math.PI * 2 : da + Math.PI * 2;
+      const n = Math.max(2, Math.ceil(Math.abs(da) * r / 1.2));
+      for (let k = 0; k <= n; k++) { const a = a1 + (da * k) / n; const x = gb.x + Math.cos(a) * r, z = gb.z + Math.sin(a) * r; pts.push(x, floorAt(x, gb.yRim, z), z); }
+    };
+    const ang = (gb, x, z) => Math.atan2(z - gb.z, x - gb.x);
+    let cur = G[d.chain[0]];
+    let curA = ang(cur, d.exit.x, d.exit.z);
+    // step off the stair onto the first rim
+    const first = [];
+    for (let k = 0; k <= 6; k++) { const x = d.exit.x - d.exit.ux * (6 - k) * 0.8, z = d.exit.z - d.exit.uz * (6 - k) * 0.8; first.push(x, floorAt(x, d.exit.y, z), z); }
+    let pts = first;
+    for (const b of d.bridges.filter((bb) => bb.kind !== 'branch')) {
+      if (b.from !== cur.id) continue;
+      arc(cur, curA, ang(cur, b.ax, b.az), pts);
+      const L = Math.hypot(b.bx - b.ax, b.bz - b.az), n = Math.ceil(L / 0.8);
+      for (let k = 0; k <= n; k++) { const t = k / n; const x = b.ax + (b.bx - b.ax) * t, z = b.az + (b.bz - b.az) * t; pts.push(x, floorAt(x, b.ay + (b.by - b.ay) * t, z), z); }
+      out.push({ name: `${cur.name} → ${b.to >= 0 ? G[b.to].name : 'the floor'}`, pts });
+      pts = [];
+      if (b.to < 0) break;
+      cur = G[b.to]; curA = ang(cur, b.bx, b.bz);
+    }
+    return out;
+  });
+  console.log(`Layer 4: ${legs.length} legs from the Gate Stair to the floor of the deep`);
+  await page.evaluate((legs) => { window.__l4Legs = legs; }, legs);
+  let keep4 = process.env.L4 !== 'only';
+  for (let i = 0; i < legs.length; i++) {
+    const res = await page.evaluate(([i, keep]) => { const L = window.__l4Legs[i]; return window.__walk(L.name, 300, L.pts, keep); }, [i, keep4]);
+    const pass = res.progress > 0.97 && res.deaths === 0;
+    const st = await page.evaluate(() => { const s2 = window.__stuck; window.__stuck = null; return s2; });
+    if (!pass && st) console.log('     stuck:', JSON.stringify(st));
+    if (!pass) ok = false;
+    keep4 = pass;
+    console.log(`${pass ? 'OK  ' : 'FAIL'} ${JSON.stringify(res)}`);
+  }
+  if (legs.length) {
+    const end = await page.evaluate(() => { const p = window.__descents.player.pos; return { y: Math.round(p.y), layer: window.__descents.layerInfo.layer }; });
+    console.log(`reached depth ${-end.y} m (layer ${end.layer}) on the floor of the deep`);
+  } else { ok = false; console.log('FAIL Layer 4 has no walkable chain'); }
 }
 if (errors.length) { ok = false; console.log('page errors:', errors.slice(0, 5)); }
 console.log(ok ? 'All routes walked.' : 'Some routes could not be walked.');

@@ -244,7 +244,7 @@ export function helixTunnel(field, { id, thetaStart, dir, rOffset, yStart, yEnd,
  * Flatten caves into a capsule array: [ax, ay, az, bx, by, bz, ra, rb, code]
  * where code = caveId + materialClass * 65536 (see CAVE_MAT).
  */
-export const CAVE_MAT = { DEFAULT: 0, FAULT: 1, DEN: 2, DEEP: 3 };
+export const CAVE_MAT = { DEFAULT: 0, FAULT: 1, DEN: 2, DEEP: 3, ENTRY: 4 };
 export function cavesToCapsules(caves) {
   const caps = [];
   for (const c of caves) {

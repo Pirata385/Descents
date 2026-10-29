@@ -18,7 +18,7 @@ import { RNG } from '../core/rng.js';
 import { clamp, lerp } from '../core/mathutil.js';
 import { G, individualGenes, inheritGenes, subspeciesAt } from './genome.js';
 import { phenotype, juvenilize } from './anatomy.js';
-import { buildCreature } from './bodyMesh.js';
+import { buildCreature, buildCreatureAsync } from './body.js';
 import { Animator } from './motion.js';
 import { decide, ACTION_LABEL } from './brain.js';
 import { Habitats, BAND } from './habitat.js';
@@ -79,7 +79,7 @@ export class Ecosystem {
   // ------------------------------------------------------------------ regions
   regionKey(band, x, y, z) {
     const i = Math.floor(x / RS), j = Math.floor(z / RS);
-    const slice = band === BAND.CAVE3 || band === BAND.CHASM ? Math.floor((this.plan.params.plainY - y) / 160) : 0;
+    const slice = band === BAND.CAVE3 || band === BAND.CHASM ? Math.floor((this.plan.params.plainY - y) / 160) : band === BAND.GOBLETS ? Math.floor(-y / 80) : 0;
     return `${band}:${i}:${j}:${slice}`;
   }
 
@@ -207,7 +207,9 @@ export class Ecosystem {
       calling: 0, callT: rng.range(2, 15), strike: 0, region: opts.region || null, speed: 0, turn: 0, bank: 0,
       wanderDir: new THREE.Vector3(Math.cos(rng.range(0, 6.28)), 0, Math.sin(rng.range(0, 6.28))),
       obj: null, dead: false, visible: false, anim: null, built: false, flapping: true, lastFloorY: pos.y,
+      hp: 0, maxHp: 0, hurtT: 0, stunT: 0, slowT: 0, burnT: 0, poisonT: 0, strikeCd: 0,
     };
+    a.maxHp = a.hp = healthFor(ph, sp, ageScale);
     Object.defineProperty(a, 'juvenile', { get() { return this.age < this.maturity; } });
     Object.defineProperty(a, 'airborne', { get() { return this.mode === 'air'; } });
     Object.defineProperty(a, 'ceil', { get() { return this.mode === 'ceiling' || this.mode === 'hang'; } });
@@ -229,9 +231,30 @@ export class Ecosystem {
     return a;
   }
 
+  /** Mesh detail (metaball grid cells along the body) from the graphics quality. */
+  meshRes() {
+    const q = this.game.settings && this.game.settings.quality;
+    return q === 'low' ? 20 : q === 'medium' ? 25 : q === 'ultra' ? 34 : 30;
+  }
+
+  /**
+   * Start building a body: its skin is meshed in a worker, so a new creature
+   * costs the main thread almost nothing; it appears when the skin is ready.
+   */
   build(a) {
-    if (a.built || a.dead) return;
-    const cr = buildCreature(a.ph, a.id);
+    if (a.built || a.building || a.dead) return;
+    if (this.syncBuild || typeof Worker === 'undefined') { this.attach(a, buildCreature(a.ph, a.id, { res: this.meshRes() })); return; }
+    a.building = true;
+    this.pending = (this.pending || 0) + 1;
+    buildCreatureAsync(a.ph, a.id, { res: this.meshRes() }).then((cr) => {
+      this.pending--;
+      a.building = false;
+      if (a.dead || a.gone) { cr.mesh.geometry.dispose(); cr.mesh.skeleton.dispose(); return; }
+      this.attach(a, cr);
+    });
+  }
+
+  attach(a, cr) {
     const root = new THREE.Group();
     root.add(cr.mesh);
     root.scale.setScalar(a.ageScale);
@@ -273,6 +296,57 @@ export class Ecosystem {
     this.carcasses.push({ pos: a.pos.clone(), meat: a.ph.scale * 2, time: 240, sp: a.sp });
   }
 
+  // ------------------------------------------------------------------ combat
+  /**
+   * Hurt a creature. opts: { from: 'player' | agent, knock: Vector3 (m/s), stun, slow, burn, poison (seconds) }.
+   * Prey and the timid flee; hunters, the aggressive and parents with young turn on the attacker.
+   * Returns true when the blow kills it.
+   */
+  damage(a, dmg, opts = {}) {
+    if (a.dead || dmg <= 0) return false;
+    a.hp -= dmg;
+    if (!opts.dot) a.hurtT = 0.35;
+    if (opts.from === 'player') a.lastFrom = 'player';
+    if (opts.stun) a.stunT = Math.max(a.stunT, opts.stun);
+    if (opts.slow) a.slowT = Math.max(a.slowT, opts.slow);
+    if (opts.burn) a.burnT = Math.max(a.burnT, opts.burn);
+    if (opts.poison) a.poisonT = Math.max(a.poisonT, opts.poison);
+    if (opts.knock && !a.boss) {
+      // a shove: fliers are knocked through the air, walkers slide along the ground
+      const k = opts.knock.clone().multiplyScalar(1 / Math.max(0.6, Math.sqrt(a.ph.scale)));
+      if (a.mode === 'air') a.vel.add(k);
+      else { a.knock = (a.knock || new THREE.Vector3()).add(k); a.knockT = 0.35; }
+    }
+    if (!opts.dot) this.emit('hurt', { a, dmg, from: opts.from });
+    if (a.hp <= 0) {
+      a.hp = 0;
+      a.slain = true;
+      this.kill(a, opts.from === 'player' ? this.playerAgent : opts.from || null);
+      this.emit('slain', { a, by: opts.from });
+      return true;
+    }
+    if (opts.from === 'player' && !opts.dot) this.provoke(a);
+    return false;
+  }
+
+  /** The explorer struck this creature: it fights back or flees (and warns its group). */
+  provoke(a) {
+    if (a.boss) return;
+    const c = a.genes.c, B = a.sp.behavior;
+    const calm = this.game.artifacts?.mods?.calm || 0;
+    const fierce = c[G.aggression] * (1 - calm * 0.6) + (B.diet === 'carnivore' ? 0.25 : 0) + (B.playerAware ? 0.5 : 0) + (a.nestEggs > 0 || a.broodT > 0 ? 0.35 : 0) + Math.min(0.4, a.ph.scale * 0.15) - (a.juvenile ? 0.5 : 0);
+    if (fierce > 0.62 && a.mode !== 'hang') {
+      a.state = 'retaliate'; a.timer = 8 + c[G.aggression] * 10; a.target = { agent: this.playerAgent, kind: 'explorer' };
+      if (a.mode === 'perch') a.mode = a.ph.stats.fly > 0 ? 'air' : 'ground';
+      this.call(a, 'threat');
+      this.emit('retaliate', { a });
+    } else {
+      a.needs.fear = 1; a.thinkT = 0;
+      a.avoid = a.avoid || new THREE.Vector3(); a.avoid.copy(this.playerAgent.pos); a.avoidT = 30;
+    }
+    for (const o of this.neighbours(a, 25)) if (o.sp === a.sp && !o.dead && o.state !== 'retaliate') { o.needs.fear = Math.max(o.needs.fear, 0.8); o.thinkT = Math.random() * 0.3; }
+  }
+
   // ------------------------------------------------------------------ spawning
   /**
    * The area around the explorer where creatures live: it follows the render
@@ -304,7 +378,7 @@ export class Ecosystem {
     }
     // and clear away the departed and the long dead
     this.agents = this.agents.filter((a) => {
-      if (a.dead && (a.gone || a.deadT > 3)) { this.dispose(a); return false; }
+      if (a.dead && (a.gone || a.deadT > 3.2)) { this.dispose(a); return false; }
       return true;
     });
     // regions in the area are "active": their numbers are the creatures present
@@ -390,11 +464,15 @@ export class Ecosystem {
     if (this.tickTimer <= 0) { this.tickTimer = 5; this.abstractTick(5); }
     this.activationTimer -= dt;
     if (this.activationTimer <= 0) { this.activationTimer = 0.5; this.updateActivation(player.pos); }
-    // build bodies within a small time budget per frame (at least one)
-    const bt = performance.now();
-    while (this.buildQueue.length) {
-      this.build(this.buildQueue.shift());
-      if (performance.now() - bt > 2.5) break;
+    // start building bodies: a few at a time in the worker, nearest first
+    if (this.buildQueue.length) {
+      const bt = performance.now();
+      const cam = g.camera ? g.camera.position : player.pos;
+      if (this.buildQueue.length > 1) this.buildQueue.sort((x, y) => x.pos.distanceToSquared(cam) - y.pos.distanceToSquared(cam));
+      while (this.buildQueue.length && (this.pending || 0) < 4) {
+        this.build(this.buildQueue.shift());
+        if (performance.now() - bt > 2.5) break;
+      }
     }
     this.rebuildGrid();
     for (const at of this.attractors) at.t -= dt;
@@ -402,7 +480,18 @@ export class Ecosystem {
     const cam = g.camera ? g.camera.position : player.pos;
     this.frame = (this.frame || 0) + 1;
     for (const a of this.agents) {
-      if (a.dead) { a.deadT = (a.deadT || 0) + dt; if (a.obj) a.obj.root.visible = false; continue; }
+      if (a.dead) {
+        a.deadT = (a.deadT || 0) + dt;
+        if (a.obj) {
+          // the slain topple over and sink away; the others simply go
+          if (a.slain && a.deadT < 2.6) {
+            const k = Math.min(1, a.deadT / 0.6);
+            a.obj.root.rotation.z = k * 1.45 * (a.id % 2 ? 1 : -1);
+            a.obj.root.position.y = a.pos.y - Math.max(0, a.deadT - 1.4) * a.ph.scale * 0.5;
+          } else a.obj.root.visible = false;
+        }
+        continue;
+      }
       // distant individuals think and move at a lower rate (simulation level of detail)
       let d2 = a.pos.distanceToSquared(cam);
       const every = d2 < 70 * 70 ? 1 : d2 < 130 * 130 ? 2 : 3;
@@ -446,6 +535,19 @@ export class Ecosystem {
       a.ageScale = s; a.scale = a.ph.scale * s;
       if (a.obj) a.obj.root.scale.setScalar(s);
     }
+    // wounds: burning and poison hurt over time; stunned and frozen creatures stand still
+    if (a.burnT > 0) { a.burnT -= dt; if (this.damage(a, 4 * dt, { from: a.lastFrom, dot: true })) return; }
+    if (a.poisonT > 0) { a.poisonT -= dt; if (this.damage(a, 2.5 * dt, { from: a.lastFrom, dot: true })) return; }
+    if (a.hurtT > 0) a.hurtT -= dt;
+    if (a.slowT > 0) a.slowT -= dt;
+    if (a.stunT > 0) { a.stunT -= dt; a.speed = 0; a.action = 'idle'; if (a.mode === 'air') { a.vel.y -= 6 * dt; a.pos.addScaledVector(a.vel, dt); const f = this.hab.floorNear(a.pos.x, a.pos.y, a.pos.z, 4, 1); if (f && a.pos.y < f.y + 0.3) { a.pos.y = f.y; a.mode = a.ph.stats.fly > 0 && a.sp.behavior.habitat === 'air' ? 'air' : 'ground'; a.vel.set(0, 0, 0); } } return; }
+    if (a.knockT > 0) {
+      a.knockT -= dt;
+      const step = a.knock.clone().multiplyScalar(dt);
+      const f = this.hab.floorNear(a.pos.x + step.x, a.pos.y, a.pos.z + step.z, 1.2, 0.8);
+      if (f) a.pos.set(a.pos.x + step.x, f.y, a.pos.z + step.z);
+      a.knock.multiplyScalar(Math.max(0, 1 - dt * 6));
+    }
     a.timer -= dt;
     a.thinkT -= dt;
     if (a.avoidT > 0) a.avoidT -= dt;
@@ -454,7 +556,9 @@ export class Ecosystem {
     if (a.thinkT <= 0) {
       a.thinkT = 0.45 + Math.random() * 0.5;
       const prev = a.state;
-      decide(a, this);
+      // a creature that turned on the explorer keeps at it for a while
+      if (a.boss) this.bossThink(a, dt);
+      else if (!(a.state === 'retaliate' && a.timer > 0 && this.player && this.player.mode !== 'dead')) decide(a, this);
       this.onActionStart(a, prev);
     }
     this.act(a, dt);
@@ -655,6 +759,32 @@ export class Ecosystem {
         } else if (Math.random() < dt * 0.5) this.call(a, 'alarm');
         break;
       }
+      case 'retaliate': {
+        // turned on the explorer: close in and strike (fliers swoop), until it gives up
+        const p = this.playerAgent.pos;
+        const d = p.distanceTo(a.pos);
+        a.lookAt = p;
+        a.strikeCd = Math.max(0, (a.strikeCd || 0) - dt);
+        if (air) {
+          a.guardT = (a.guardT || 0) - dt;
+          if (a.guardT <= 0) { a.guardT = 2.2; a.swoop = !a.swoop; }
+          if (a.swoop) a.goal.set(p.x, p.y + 1.2, p.z);
+          else a.goal.set(p.x + Math.cos(a.id) * 8, p.y + 6, p.z + Math.sin(a.id) * 8);
+          hasGoal = true; speed = fly * (a.swoop ? 1.3 : 0.9);
+        } else { a.goal.copy(p); hasGoal = d > 1 + a.scale * 0.35; speed = run; }
+        a.action = d < 3 + a.scale ? 'attack' : 'display';
+        const reach = 1.5 + a.scale * 0.55;
+        if (d < reach && a.strikeCd <= 0 && this.player && this.player.mode !== 'dead') {
+          a.strikeCd = 1.5 - a.genes.c[G.agility] * 0.5;
+          if (air) a.swoop = false;
+          const dmg = Math.max(2, Math.round(2 + a.ph.scale * 5));
+          this.player.hurt(dmg, 'creature', a);
+          this.emit('creature-strike', { a, dmg });
+          this.call(a, 'threat');
+        }
+        if (a.timer <= 0 || d > 70) { a.state = 'wander'; a.timer = 3; }
+        break;
+      }
       case 'investigate': {
         const p = this.playerAgent.pos;
         const d = p.distanceTo(a.pos);
@@ -772,6 +902,7 @@ export class Ecosystem {
 
   // ------------------------------------------------------------------ movement
   move(a, dt) {
+    if (a.slowT > 0) a.wantSpeed *= 0.45;
     switch (a.mode) {
       case 'cave': this.moveCave(a, dt); break;
       case 'wall': this.moveWall(a, dt); break;
@@ -1000,6 +1131,7 @@ export class Ecosystem {
       speed: air ? a.speed : a.speed / Math.max(0.3, a.ageScale), mode,
       action: a.calling > 0 && a.action === 'idle' ? 'call' : a.action,
       lookYaw, lookPitch, turn: a.turn, bank: a.bank, flap: a.flapping ? 1 : 0, hop: a.sp.behavior.locomotion === 'hop',
+      hurt: a.hurtT > 0 || a.stunT > 0,
     });
   }
 
@@ -1024,6 +1156,13 @@ export class Ecosystem {
     }
     if (s.stats) Object.assign(this.stats, s.stats);
   }
+}
+
+/** Hit points of an individual: grows with size; stone bodies and shells take more, jellies less. */
+export function healthFor(ph, sp, ageScale = 1) {
+  const famK = { lithosere: 1.8, arthropod: 0.85, medusoid: 0.7, bird: 0.8, mollusc: 1.1 }[ph.family] ?? 1;
+  const armour = 1 + (ph.plates || 0) * 0.45 + (ph.shell?.size || 0) * 0.6;
+  return Math.max(4, Math.round((10 + 34 * Math.pow(ph.scale, 1.3)) * famK * armour * Math.pow(ageScale, 1.5)));
 }
 
 export { lerp };

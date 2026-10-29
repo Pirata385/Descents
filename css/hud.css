@@ -16,6 +16,8 @@
 .cm.dowse { background: #c49aff; box-shadow: 0 0 6px #c49aff; transform: rotate(45deg); border-radius: 1px; }
 .cm.sense { width: 5px; height: 5px; margin-left: -2.5px; background: #8fd6a0; }
 .cm.sense.danger { background: #ff6a50; }
+.cm.down { width: 0; height: 0; margin-left: -6px; border-radius: 0; background: none; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 9px solid #8fe0ff; filter: drop-shadow(0 0 4px #8fe0ff); }
+.cm.down em { color: #bfefff; }
 
 /* crosshair */
 .crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }

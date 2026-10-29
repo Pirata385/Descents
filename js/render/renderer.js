@@ -15,6 +15,9 @@ export class GameRenderer {
     this.plan = plan;
     this.settings = settings;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: settings.antialias !== false, powerPreference: 'high-performance' });
+    // checking every shader for errors makes the browser wait for each compile to finish (a stall
+    // whenever something new appears); the shaders are known to compile, so only debug runs check
+    this.renderer.debug.checkShaderErrors = /[?&]debug=/.test(location.search);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, settings.pixelRatio || 1.5));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -233,7 +236,13 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
       t.fog.setRGB(lerp(0.66, 0.5, d), lerp(0.7, 0.56, d), lerp(0.75, 0.63, d)).multiplyScalar((1 - cave * 0.55) * lerp(1, 0.45, night));
       t.hemiSky.setRGB(...v.ambient);
       t.hemiI = 2.2;
-      if (ctx.layer >= 4) { t.glow.setRGB(0.05, 0.13, 0.17); t.fog.setRGB(...v.fogColor); }
+      if (ctx.layer >= 4) {
+        // the Goblets of Giants: a blue mist lit by the glowing bark of the goblets
+        t.glow.setRGB(0.09, 0.19, 0.25);
+        t.fog.setRGB(...v.fogColor);
+        t.hemiSky.setRGB(...v.ambient);
+        t.hemiI = 1.7;
+      }
       t.fogDensity = v.fogDensity * (1 + ctx.enclosed * 0.6);
     } else {
       const glowBase = ctx.layer === 2 ? [0.05, 0.14, 0.12] : [0.04, 0.07, 0.07];
@@ -253,7 +262,9 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
     this.time += dt;
     shared.uTime.value = this.time;
     const st = this.computeTarget(ctx);
-    const k = 1 - Math.exp(-dt * 1.5);
+    // the atmosphere eases between places (and snaps into place on arrival)
+    const k = this.snapEnv ? 1 : 1 - Math.exp(-dt * 1.5);
+    this.snapEnv = false;
     const e = this.env, t = this.target;
     e.fog.lerp(t.fog, k); e.fogDensity = lerp(e.fogDensity, t.fogDensity, k);
     e.hemiSky.lerp(t.hemiSky, k); e.hemiGround.lerp(t.hemiGround, k); e.hemiI = lerp(e.hemiI, t.hemiI, k);
@@ -338,6 +349,17 @@ void main(){ float edge = smoothstep(0.0,0.35,vUv.x)*smoothstep(1.0,0.65,vUv.x);
   }
 
   /** Render distance in chunks (32 m each): the edge fog closes in at that radius. */
+  /** Compile the shaders of everything in the scene (plus extra objects shown later). */
+  async warmup(extra = []) {
+    const added = [];
+    for (const o of extra) { if (!o.parent) { o.position.copy(this.camera.position); o.position.z -= 3; this.scene.add(o); added.push(o); } }
+    try {
+      if (this.renderer.compileAsync) await Promise.race([this.renderer.compileAsync(this.scene, this.camera), new Promise((r) => setTimeout(r, 8000))]);
+      else this.renderer.compile(this.scene, this.camera);
+    } catch (err) { console.warn('shader warm-up', err); }
+    for (const o of added) this.scene.remove(o);
+  }
+
   setRenderDistance(chunks) {
     this.fogEdge = chunks * 32;
     shared.uFogEdge.value = this.fogEdge;

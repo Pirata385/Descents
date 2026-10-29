@@ -17,6 +17,8 @@ import { TouchControls, detectTouch } from './touch.js';
 import { Journal } from './journal.js';
 import { LAYERS } from '../world/layers.js';
 import { FAMILY_LABEL } from '../creatures/genome.js';
+import { buildCreature } from '../creatures/body.js';
+import { typicalPhenotype } from '../creatures/anatomy.js';
 import { GamepadInput, GLYPH } from '../core/gamepad.js';
 
 const SETTINGS_KEY = 'descents.settings.v1';
@@ -43,7 +45,7 @@ const DEFAULT_SETTINGS = {
 // lighter defaults the first time the game runs on a phone or tablet
 // phones and tablets cannot show more frames than their screen refreshes, so
 // drawing extra ones only drains the battery: they start in step with the display
-const MOBILE_DEFAULTS = { ...QUALITY.low, antialias: false, fpsLimit: -1 };
+const MOBILE_DEFAULTS = { ...QUALITY.low, antialias: false, fpsLimit: 0 };
 
 const TIPS = [
   'The Abyss Eye sits at the centre of the world. Every route down begins at its rim.',
@@ -125,6 +127,8 @@ export class App {
     try {
       const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
       if (raw.renderChunks === undefined && QUALITY[raw.quality]) this.settings.renderChunks = QUALITY[raw.quality].renderChunks;
+      // 0.4.0 started phones at the display refresh rate: from 0.5.0 nothing is capped unless the player asks
+      if (!raw.uncapped5) { if (raw.fpsLimit === -1) this.settings.fpsLimit = 0; this.settings.uncapped5 = true; saveSettings(this.settings); }
     } catch { /* no saved settings */ }
     this.settings.quality = presetOf(this.settings);
     this.dynScale = 1;
@@ -587,6 +591,8 @@ export class App {
     g.grapple = new Grapple(g, p);
     p.grapple = g.grapple;
     g.ecosystem = new Ecosystem(g);
+    // a body to compile the creature shader with before play begins
+    try { const sp0 = plan.species[0]; g.warmupObjects = [buildCreature(typicalPhenotype(sp0), 1, { res: 12 }).mesh]; } catch (err) { console.warn(err); }
     g.artifacts = new ArtifactSystem(g);
     g.discovery = new Discovery(g);
     g.mapData = new MapData(g);

@@ -7,15 +7,16 @@
 // - subspecies: regional forms with their own gene offsets and allele biases,
 //   assigned by where in the world a population lives (depth, sector, tier),
 // - inheritance: offspring mix both parents gene by gene, plus mutation.
-// Body plans (quadruped, biped, sprawler, serpent, avian, bat, glider, insect,
-// spider, centipede, golem, roller) fix the skeleton; genes shape everything else.
+// Body plans (quadruped, hexapod, strider, biped, hopper, sprawler, serpent,
+// avian, bat, glider, insect, spider, centipede, crab, slug, floater, golem,
+// roller) fix the skeleton; genes shape everything else.
 // Pure data, no rendering.
 import { RNG } from '../core/rng.js';
 import { clamp, lerp } from '../core/mathutil.js';
 import { LAYERS } from '../world/layers.js';
 
-export const FAMILIES = ['mammal', 'reptile', 'bird', 'arthropod', 'lithosere'];
-export const FAMILY_LABEL = { mammal: 'Mammal', reptile: 'Reptilian', bird: 'Bird', arthropod: 'Arthropod', lithosere: 'Lithosere' };
+export const FAMILIES = ['mammal', 'reptile', 'bird', 'amphibian', 'arthropod', 'mollusc', 'medusoid', 'lithosere'];
+export const FAMILY_LABEL = { mammal: 'Mammal', reptile: 'Reptilian', bird: 'Bird', amphibian: 'Amphibian', arthropod: 'Arthropod', mollusc: 'Mollusc', medusoid: 'Medusoid', lithosere: 'Lithosere' };
 
 // ------------------------------------------------------------------ genes
 export const GENES = [
@@ -24,6 +25,8 @@ export const GENES = [
   'hornLen', 'hornCurve', 'crestSize', 'spikeLen', 'spikeCount', 'frill', 'plates', 'whisker', 'shag',
   'hue', 'sat', 'light', 'hue2', 'sat2', 'light2', 'belly', 'accentHue', 'patternScale', 'patternContrast', 'glow',
   'boldness', 'curiosity', 'sociality', 'aggression', 'agility', 'speed', 'nocturnal', 'callPitch', 'callRate', 'territory',
+  // shape of the body (Spore-like proportions) and character
+  'chestMass', 'cute', 'eyePos', 'mouthW', 'headLong', 'limbChunk', 'bounce', 'playful', 'tentacles', 'shellSize', 'bellyRound',
 ];
 export const G = Object.fromEntries(GENES.map((n, i) => [n, i]));
 export const NG = GENES.length;
@@ -36,17 +39,23 @@ export const ALLELES = {
   crest: ['none', 'sail', 'ridge', 'fin', 'plume', 'fan', 'spikes', 'casque', 'frills'],
   tailTip: ['none', 'tuft', 'club', 'spike', 'fan', 'plume', 'fork', 'stinger'],
   pattern: ['none', 'stripes', 'spots', 'bands', 'mottled', 'gradient', 'saddle', 'ocelli'],
-  eyes: [2, 3, 4, 6, 8],
+  eyes: [1, 2, 3, 4, 6, 8],
   spikeRows: [0, 1, 2],
   cheek: ['none', 'spikes', 'whiskers', 'dewlap'],
+  mouth: ['muzzle', 'beak', 'grin', 'mandibles', 'trunk', 'sucker', 'tusked'],
+  eyeStyle: ['socket', 'bulge', 'stalk', 'top', 'cyclops'],
+  feet: ['paw', 'hoof', 'claw', 'pad', 'talon', 'none'],
 };
 const ALLELE_KEYS = Object.keys(ALLELES);
 
 // ------------------------------------------------------------------ body plans
 export const PLANS = {
   quadruped: { legs: 2, biped: false, posture: 'erect', families: ['mammal', 'reptile', 'lithosere'] },
+  hexapod: { legs: 3, biped: false, posture: 'erect', families: ['mammal', 'reptile', 'amphibian'] },
+  strider: { legs: 2, biped: false, posture: 'erect', families: ['mammal', 'amphibian'] },
   biped: { legs: 1, biped: true, posture: 'digitigrade', families: ['mammal', 'reptile', 'bird'] },
-  sprawler: { legs: 2, biped: false, posture: 'sprawl', families: ['reptile'] },
+  hopper: { legs: 2, biped: false, posture: 'hop', families: ['amphibian', 'mammal'] },
+  sprawler: { legs: 2, biped: false, posture: 'sprawl', families: ['reptile', 'amphibian'] },
   serpent: { legs: 0, biped: false, posture: 'none', families: ['reptile'] },
   avian: { legs: 1, biped: true, posture: 'digitigrade', wings: 'feather', families: ['bird'] },
   bat: { legs: 1, biped: false, posture: 'sprawl', wings: 'membrane', families: ['mammal'] },
@@ -54,6 +63,9 @@ export const PLANS = {
   insect: { legs: 3, biped: false, posture: 'arthropod', families: ['arthropod'] },
   spider: { legs: 4, biped: false, posture: 'arthropod', families: ['arthropod'] },
   centipede: { legs: 7, biped: false, posture: 'arthropod', families: ['arthropod'] },
+  crab: { legs: 3, biped: false, posture: 'arthropod', families: ['arthropod'] },
+  slug: { legs: 0, biped: false, posture: 'none', families: ['mollusc'] },
+  floater: { legs: 0, biped: false, posture: 'none', families: ['medusoid'] },
   golem: { legs: 2, biped: false, posture: 'erect', families: ['lithosere'] },
   roller: { legs: 0, biped: false, posture: 'none', families: ['lithosere'] },
 };
@@ -70,12 +82,17 @@ export const NICHES = {
   urban_small: { diet: 'omnivore', size: [0.2, 0.55], plans: { quadruped: 4, sprawler: 1 }, social: [['group', 2], ['solitary', 1]], habitat: 'ground', move: 'run' },
   scavenger_flier: { diet: 'scavenger', size: [0.7, 1.5], plans: { avian: 1 }, social: [['solitary', 2], ['group', 2]], habitat: 'air', move: 'soar', nest: 'cliff' },
   pollinator: { diet: 'nectar', size: [0.05, 0.2], plans: { insect: 5, avian: 1 }, social: [['swarm', 3], ['solitary', 1]], habitat: 'air', move: 'hover' },
+  garden_snail: { diet: 'browser', size: [0.08, 0.3], plans: { slug: 1 }, social: [['solitary', 2], ['group', 1]], habitat: 'ground', move: 'creep' },
   // layer 1 and 2
-  grazer: { diet: 'grazer', size: [1.3, 3.0], plans: { quadruped: 6, golem: 1 }, social: [['herd', 4], ['group', 2]], habitat: 'ground', move: 'walk' },
-  grazer_small: { diet: 'grazer', size: [0.3, 0.85], plans: { quadruped: 4, biped: 2 }, social: [['group', 3], ['colony', 2], ['pair', 1]], habitat: 'ground', move: 'hop' },
-  browser: { diet: 'browser', size: [1.0, 2.6], plans: { quadruped: 4, biped: 1 }, social: [['group', 2], ['solitary', 1], ['pair', 1]], habitat: 'ground', move: 'walk', tall: true },
-  mesopredator: { diet: 'carnivore', size: [0.6, 1.4], plans: { quadruped: 4, sprawler: 2, biped: 2 }, social: [['solitary', 3], ['pair', 2], ['pack', 2]], habitat: 'ground', move: 'run' },
-  apex_predator: { diet: 'carnivore', size: [2.0, 4.2], plans: { quadruped: 3, biped: 3, sprawler: 1 }, social: [['solitary', 3], ['pair', 1.5], ['pack', 1]], habitat: 'ground', move: 'run' },
+  grazer: { diet: 'grazer', size: [1.3, 3.0], plans: { quadruped: 5, hexapod: 2, golem: 1 }, social: [['herd', 4], ['group', 2]], habitat: 'ground', move: 'walk' },
+  grazer_small: { diet: 'grazer', size: [0.3, 0.85], plans: { quadruped: 3, hopper: 2, biped: 2 }, social: [['group', 3], ['colony', 2], ['pair', 1]], habitat: 'ground', move: 'hop' },
+  browser: { diet: 'browser', size: [1.0, 2.6], plans: { quadruped: 3, strider: 2, hexapod: 1, biped: 1 }, social: [['group', 2], ['solitary', 1], ['pair', 1]], habitat: 'ground', move: 'walk', tall: true },
+  mesopredator: { diet: 'carnivore', size: [0.6, 1.4], plans: { quadruped: 4, sprawler: 2, biped: 2, hexapod: 1 }, social: [['solitary', 3], ['pair', 2], ['pack', 2]], habitat: 'ground', move: 'run' },
+  apex_predator: { diet: 'carnivore', size: [2.0, 4.2], plans: { quadruped: 3, biped: 3, sprawler: 1, hexapod: 1 }, social: [['solitary', 3], ['pair', 1.5], ['pack', 1]], habitat: 'ground', move: 'run' },
+  pond_hopper: { diet: 'insectivore', size: [0.12, 0.45], plans: { hopper: 4, sprawler: 1 }, social: [['colony', 2], ['solitary', 1]], habitat: 'shore', move: 'hop' },
+  moss_slug: { diet: 'lichen', size: [0.2, 0.8], plans: { slug: 1 }, social: [['solitary', 2], ['group', 1]], habitat: 'ground', move: 'creep' },
+  spore_floater: { diet: 'plankton', size: [0.3, 1.6], plans: { floater: 1 }, social: [['swarm', 2], ['group', 2], ['solitary', 1]], habitat: 'air', move: 'drift' },
+  gallery_crab: { diet: 'scavenger', size: [0.25, 0.9], plans: { crab: 1 }, social: [['solitary', 2], ['group', 1]], habitat: 'ground', move: 'scuttle' },
   insectivore_flier: { diet: 'insectivore', size: [0.14, 0.4], plans: { avian: 5, insect: 1 }, social: [['flock', 4], ['pair', 1]], habitat: 'air', move: 'fly', nest: 'cliff' },
   piscivore: { diet: 'piscivore', size: [0.5, 1.5], plans: { avian: 1 }, social: [['solitary', 2], ['group', 1]], habitat: 'shore', move: 'wade', nest: 'shore' },
   decomposer: { diet: 'detritivore', size: [0.15, 0.7], plans: { insect: 3, centipede: 2, spider: 1 }, social: [['colony', 3], ['solitary', 1]], habitat: 'ground', move: 'crawl' },
@@ -95,13 +112,24 @@ export const NICHES = {
   chasm_drake: { diet: 'insectivore', size: [0.35, 0.9], plans: { sprawler: 3, glider: 2 }, social: [['group', 2], ['solitary', 1]], habitat: 'wall', move: 'climb', nest: 'ledge' },
   chasm_bat: { diet: 'insectivore', size: [0.12, 0.3], plans: { bat: 1 }, social: [['swarm', 4]], habitat: 'air', move: 'flutter', nest: 'roost' },
   chasm_fox: { diet: 'lichen', size: [0.4, 0.8], plans: { bat: 1 }, social: [['colony', 3], ['group', 1]], habitat: 'air', move: 'fly', nest: 'roost' },
+  // layer 4: the Goblets of Giants (shallow lakes in giant cups, waterfalls, mist)
+  goblet_wader: { diet: 'piscivore', size: [0.9, 2.2], plans: { strider: 3, avian: 2 }, social: [['solitary', 2], ['group', 2]], habitat: 'shore', move: 'wade' },
+  lake_hopper: { diet: 'insectivore', size: [0.15, 0.6], plans: { hopper: 1 }, social: [['colony', 3], ['group', 1]], habitat: 'shore', move: 'hop' },
+  mist_floater: { diet: 'plankton', size: [0.5, 2.6], plans: { floater: 1 }, social: [['swarm', 2], ['group', 2], ['solitary', 1]], habitat: 'air', move: 'drift' },
+  spray_swift: { diet: 'insectivore', size: [0.15, 0.4], plans: { avian: 3, bat: 1 }, social: [['flock', 4]], habitat: 'air', move: 'fly' },
+  rim_grazer: { diet: 'grazer', size: [0.9, 2.4], plans: { hexapod: 3, quadruped: 2 }, social: [['herd', 3], ['group', 2]], habitat: 'ground', move: 'walk' },
+  shell_creeper: { diet: 'lichen', size: [0.2, 0.9], plans: { slug: 1 }, social: [['solitary', 2], ['group', 1]], habitat: 'ground', move: 'creep' },
+  lake_crab: { diet: 'scavenger', size: [0.3, 1.1], plans: { crab: 1 }, social: [['group', 2], ['solitary', 1]], habitat: 'shore', move: 'scuttle' },
+  goblet_stalker: { diet: 'carnivore', size: [1.3, 2.6], plans: { sprawler: 2, hexapod: 2, biped: 1 }, social: [['solitary', 3], ['pair', 1]], habitat: 'ground', move: 'stalk' },
+  vine_glider: { diet: 'nectar', size: [0.3, 0.9], plans: { glider: 2, bat: 1 }, social: [['group', 2], ['solitary', 1]], habitat: 'air', move: 'glide' },
 };
 
 const LAYER_NICHES = {
-  surface: { niches: ['urban_flier', 'urban_small', 'scavenger_flier', 'pollinator'], n: [4, 5] },
-  layer1: { niches: ['grazer', 'grazer_small', 'browser', 'mesopredator', 'apex_predator', 'insectivore_flier', 'scavenger_flier', 'piscivore', 'pollinator', 'decomposer', 'lithophage', 'cliff_glider'], n: [10, 12] },
-  layer2: { niches: ['ceiling_crawler', 'grazer', 'browser', 'mesopredator', 'apex_predator', 'insectivore_flier', 'lithophage', 'lithophage_large', 'decomposer', 'cliff_glider', 'ambush_predator', 'scavenger_flier'], n: [10, 12] },
-  layer3: { niches: ['cave_skink', 'cave_shrew', 'cave_ferret', 'chasm_swift', 'chasm_drake', 'chasm_bat', 'chasm_hawk', 'cave_gecko', 'chasm_fox'], n: [8, 9] },
+  surface: { niches: ['urban_flier', 'urban_small', 'scavenger_flier', 'pollinator', 'garden_snail'], must: 3, n: [4, 5] },
+  layer1: { niches: ['grazer', 'grazer_small', 'browser', 'mesopredator', 'apex_predator', 'insectivore_flier', 'pond_hopper', 'scavenger_flier', 'piscivore', 'pollinator', 'decomposer', 'lithophage', 'cliff_glider', 'moss_slug'], must: 7, n: [12, 14] },
+  layer2: { niches: ['ceiling_crawler', 'grazer', 'browser', 'mesopredator', 'apex_predator', 'spore_floater', 'insectivore_flier', 'lithophage', 'lithophage_large', 'decomposer', 'cliff_glider', 'ambush_predator', 'scavenger_flier', 'gallery_crab', 'moss_slug'], must: 6, n: [12, 14] },
+  layer3: { niches: ['cave_skink', 'cave_shrew', 'cave_ferret', 'chasm_swift', 'chasm_drake', 'chasm_bat', 'chasm_hawk', 'cave_gecko', 'chasm_fox'], must: 9, n: [8, 9] },
+  layer4: { niches: ['rim_grazer', 'lake_hopper', 'mist_floater', 'goblet_wader', 'spray_swift', 'shell_creeper', 'lake_crab', 'goblet_stalker', 'vine_glider'], must: 9, n: [9, 9] },
 };
 
 export const NICHE_LABEL = {
@@ -111,6 +139,9 @@ export const NICHE_LABEL = {
   lithophage_large: 'great stone eater', cliff_glider: 'cliff glider', ceiling_crawler: 'ceiling crawler', ambush_predator: 'ambush predator',
   cave_skink: 'crevice skink', cave_gecko: 'lichen gecko', cave_shrew: 'cave forager', cave_ferret: 'tunnel hunter',
   chasm_swift: 'wall-nesting swift', chasm_hawk: 'chasm raptor', chasm_drake: 'wall climber', chasm_bat: 'roosting flier', chasm_fox: 'lichen-eating flier',
+  garden_snail: 'garden snail', pond_hopper: 'pond hopper', moss_slug: 'moss slug', spore_floater: 'spore drifter', gallery_crab: 'gallery scavenger',
+  goblet_wader: 'goblet wader', lake_hopper: 'lake hopper', mist_floater: 'mist drifter', spray_swift: 'spray swift', rim_grazer: 'rim grazer',
+  shell_creeper: 'shell creeper', lake_crab: 'lake scuttler', goblet_stalker: 'goblet stalker', vine_glider: 'vine glider',
 };
 
 // gene leanings per niche / plan: [gene, mean] pairs override the uniform draw
@@ -132,6 +163,20 @@ const LEAN = {
   piscivore: [['legLen', 0.9], ['neckLen', 0.85], ['snout', 0.85]],
   lithophage_large: [['plates', 0.85], ['legThick', 0.85]],
   pollinator: [['wingSpan', 0.8], ['snout', 0.85]],
+  pond_hopper: [['eyeSize', 0.85], ['cute', 0.85], ['mouthW', 0.85], ['eyePos', 0.85], ['bounce', 0.9], ['playful', 0.7]],
+  lake_hopper: [['eyeSize', 0.8], ['cute', 0.8], ['mouthW', 0.9], ['eyePos', 0.9], ['bounce', 0.95], ['glow', 0.7]],
+  garden_snail: [['shellSize', 0.85], ['eyeSize', 0.6], ['cute', 0.75], ['speed', 0.1]],
+  moss_slug: [['shellSize', 0.3], ['tentacles', 0.7], ['cute', 0.6], ['speed', 0.1]],
+  shell_creeper: [['shellSize', 0.75], ['tentacles', 0.6], ['glow', 0.8], ['speed', 0.15]],
+  spore_floater: [['tentacles', 0.8], ['glow', 0.75], ['cute', 0.6], ['speed', 0.2]],
+  mist_floater: [['tentacles', 0.9], ['glow', 0.9], ['cute', 0.5], ['speed', 0.25], ['sociality', 0.8]],
+  goblet_wader: [['legLen', 0.95], ['neckLen', 0.85], ['snout', 0.85], ['eyeSize', 0.6], ['glow', 0.55]],
+  spray_swift: [['wingSpan', 0.9], ['speed', 0.9], ['agility', 0.95], ['sociality', 0.9], ['glow', 0.6]],
+  rim_grazer: [['bellyRound', 0.75], ['cute', 0.6], ['legLen', 0.45], ['sociality', 0.8], ['glow', 0.6]],
+  lake_crab: [['limbChunk', 0.9], ['eyeSize', 0.55], ['playful', 0.6], ['glow', 0.5]],
+  gallery_crab: [['limbChunk', 0.85], ['eyeSize', 0.5]],
+  goblet_stalker: [['aggression', 0.9], ['boldness', 0.85], ['jaw', 0.85], ['headLong', 0.8], ['cute', 0.15], ['glow', 0.75]],
+  vine_glider: [['wingSpan', 0.8], ['eyeSize', 0.8], ['cute', 0.75], ['glow', 0.7]],
 };
 
 // allele leanings: niche -> {key: [[allele, weight], ...]}
@@ -145,6 +190,26 @@ const ALLELE_LEAN = {
   chasm_drake: { ears: [['none', 1]], horns: [['none', 2], ['curved', 1], ['crown', 1], ['nose', 1]], crest: [['sail', 2], ['spikes', 2], ['frills', 2], ['ridge', 1], ['fin', 1]], tailTip: [['none', 2], ['spike', 2], ['club', 1], ['fan', 1]], cheek: [['spikes', 2], ['dewlap', 2], ['none', 1]] },
   chasm_bat: { ears: [['long', 3], ['fan', 2], ['pointed', 2]], horns: [['none', 6], ['nose', 1]], crest: [['none', 4], ['frills', 1]], cheek: [['none', 2], ['whiskers', 1]], tailTip: [['none', 3], ['fork', 1]] },
   chasm_fox: { ears: [['pointed', 3], ['round', 1], ['tufted', 1]], horns: [['none', 1]], crest: [['none', 3], ['plume', 1]], cheek: [['none', 1], ['whiskers', 1]], tailTip: [['none', 1]] },
+  goblet_stalker: { horns: [['none', 2], ['nose', 2], ['curved', 1], ['crown', 1]], crest: [['spikes', 2], ['sail', 2], ['frills', 1], ['ridge', 1]], tailTip: [['spike', 2], ['stinger', 1], ['club', 1]], mouth: [['muzzle', 2], ['grin', 1], ['tusked', 1]] },
+  rim_grazer: { horns: [['none', 2], ['antler', 1], ['curved', 1], ['crown', 1]], crest: [['none', 2], ['ridge', 1], ['plume', 1], ['sail', 1]], mouth: [['muzzle', 3], ['trunk', 2], ['grin', 1]] },
+};
+
+// mouths, eyes and feet a family can have: [allele, weight]
+const FAMILY_ALLELES = {
+  mouth: {
+    mammal: [['muzzle', 6], ['trunk', 1], ['tusked', 1], ['grin', 0.6]], reptile: [['muzzle', 4], ['grin', 2], ['beak', 0.8]], bird: [['beak', 1]],
+    amphibian: [['grin', 5], ['muzzle', 1]], arthropod: [['mandibles', 1]], mollusc: [['sucker', 2], ['grin', 2]],
+    medusoid: [['sucker', 3], ['grin', 1]], lithosere: [['grin', 3], ['muzzle', 2], ['tusked', 1]],
+  },
+  eyeStyle: {
+    mammal: [['socket', 5], ['bulge', 2], ['top', 0.4]], reptile: [['socket', 3], ['top', 2], ['bulge', 1]], bird: [['socket', 3], ['bulge', 1]],
+    amphibian: [['top', 4], ['bulge', 2], ['stalk', 0.4]], arthropod: [['bulge', 3], ['stalk', 2]], mollusc: [['stalk', 5], ['bulge', 0.5]],
+    medusoid: [['bulge', 2], ['cyclops', 1.5], ['stalk', 0.8]], lithosere: [['socket', 3], ['cyclops', 1.5], ['bulge', 1]],
+  },
+  feet: {
+    mammal: [['paw', 4], ['hoof', 2], ['claw', 2]], reptile: [['claw', 4], ['pad', 1.5]], bird: [['talon', 1]], amphibian: [['pad', 5], ['paw', 1]],
+    arthropod: [['none', 1]], mollusc: [['none', 1]], medusoid: [['none', 1]], lithosere: [['paw', 3], ['hoof', 1]],
+  },
 };
 
 // ------------------------------------------------------------------ helpers
@@ -171,6 +236,7 @@ function layerPalette(layerId, niche, rng) {
       ? { hue: [0.02, 0.14], sat: [0.05, 0.35], light: [0.45, 0.76] }   // pale, depigmented cave forms
       // the open tube: pale greys and whites against the limestone, slate blue, soft browns, a few crimson species
       : rng.weighted([[{ hue: [0, 1], sat: [0.02, 0.1], light: [0.45, 0.78] }, 3], [{ hue: [0.55, 0.65], sat: [0.12, 0.3], light: [0.35, 0.6] }, 2], [{ hue: [0.05, 0.12], sat: [0.18, 0.4], light: [0.3, 0.55] }, 2], [{ hue: [0.96, 1.02], sat: [0.45, 0.7], light: [0.3, 0.45] }, 1]]);
+    case 'layer4': return rng.weighted([[{ hue: [0.45, 0.58], sat: [0.25, 0.6], light: [0.3, 0.55] }, 4], [{ hue: [0.6, 0.78], sat: [0.25, 0.55], light: [0.3, 0.5] }, 2], [{ hue: [0, 1], sat: [0.02, 0.12], light: [0.6, 0.85] }, 1.5], [vivid, 1]]);
     default: return vivid;
   }
 }
@@ -178,6 +244,10 @@ function layerPalette(layerId, niche, rng) {
 // ------------------------------------------------------------------ species
 function familyFor(rng, plan, niche) {
   const fam = PLANS[plan].families;
+  if (plan === 'hopper') return niche === 'grazer_small' ? rng.weighted([['mammal', 3], ['amphibian', 1]]) : 'amphibian';
+  if (plan === 'strider') return niche === 'goblet_wader' ? rng.weighted([['amphibian', 2], ['mammal', 1]]) : 'mammal';
+  if (plan === 'hexapod') return rng.weighted([['mammal', 3], ['reptile', 2], ['amphibian', niche === 'rim_grazer' ? 2 : 0.5]]);
+  if (plan === 'sprawler' && (niche === 'pond_hopper' || niche === 'goblet_stalker')) return rng.weighted([['amphibian', 2], ['reptile', 1]]);
   if (niche === 'cave_shrew' || niche === 'cave_ferret' || niche === 'chasm_bat' || niche === 'chasm_fox' || niche === 'urban_small') return 'mammal';
   if (niche.startsWith('cave_') || niche === 'chasm_drake') return 'reptile';
   if (plan === 'glider') return rng.chance(0.6) ? 'reptile' : 'mammal';
@@ -211,6 +281,8 @@ function makeSpecies(seed, layer, niche, index, names, used) {
   // the deep and the dark glow
   if (layer.id === 'layer2') mean[G.glow] = Math.max(mean[G.glow], rng.range(0.25, 0.7));
   if (layer.id === 'layer3') mean[G.glow] = clamp(mean[G.glow] + 0.15, 0, 1);
+  if (layer.id === 'layer4') mean[G.glow] = clamp(Math.max(mean[G.glow], rng.range(0.55, 0.9)), 0, 1);
+  if (family === 'medusoid') { mean[G.glow] = clamp(mean[G.glow] + 0.25, 0, 1); mean[G.light] = clamp(mean[G.light] + 0.15, 0, 0.85); }
   if (layer.id === 'surface' || layer.id === 'layer1') mean[G.glow] *= 0.3;
   // spread: how much individuals of the species differ (large on purpose)
   const sd = new Float32Array(NG);
@@ -232,7 +304,11 @@ function makeSpecies(seed, layer, niche, index, names, used) {
     if (k === 'ears' && (family === 'bird' || family === 'arthropod' || family === 'lithosere' || family === 'reptile')) table = [['none', 1]];
     if (k === 'horns' && (family === 'bird' || plan === 'bat')) table = table.filter(([a]) => a === 'none' || a === 'crown').concat([['none', 3]]);
     if (k === 'eyes') {
-      const e = family === 'arthropod' ? [[2, 1], [4, 2], [6, 2], [8, plan === 'spider' ? 4 : 0.5]] : family === 'lithosere' ? [[2, 1], [3, 2], [4, 2], [6, 1]] : [[2, 12], [4, 0.8], [3, 0.4]];
+      const e = family === 'arthropod' ? (plan === 'crab' ? [[2, 1]] : [[2, 1], [4, 2], [6, 2], [8, plan === 'spider' ? 4 : 0.5]])
+        : family === 'lithosere' ? [[1, 1], [2, 1], [3, 2], [4, 2], [6, 1]]
+          : family === 'medusoid' ? [[1, 2], [2, 2], [3, 1], [4, 1], [6, 0.5]]
+            : family === 'mollusc' ? [[2, 1]]
+              : [[2, 12], [4, 0.8], [3, 0.4], [1, 0.3]];
       table = e;
     }
     if (k === 'tailTip' && family === 'bird') table = table.filter(([a]) => ['fan', 'fork', 'plume', 'none'].includes(a)).concat([['fan', 1]]);
@@ -240,11 +316,19 @@ function makeSpecies(seed, layer, niche, index, names, used) {
     if (k === 'crest' && family === 'bird') table = table.filter(([a]) => ['none', 'plume', 'fan', 'casque', 'spikes'].includes(a)).concat([['plume', 1], ['none', 1]]);
     if (k === 'crest' && family === 'mammal') table = table.filter(([a]) => ['none', 'plume', 'ridge', 'spikes'].includes(a)).concat([['none', 3]]);
     if (k === 'cheek' && family !== 'mammal' && family !== 'reptile') table = [['none', 1]];
+    if (k === 'mouth' || k === 'eyeStyle' || k === 'feet') {
+      const fam = FAMILY_ALLELES[k][family];
+      table = lean ? lean.filter(([a]) => fam.some(([b]) => b === a)) : [];
+      // two or three of the family's options, one of them common
+      if (!table.length) table = fam.map(([a, w]) => [a, w * rng.range(0.3, 1.7)]).sort((x, y) => y[1] - x[1]).slice(0, rng.int(2, 3));
+    }
+    if ((plan === 'slug' || plan === 'floater' || plan === 'serpent' || plan === 'roller') && (k === 'horns' || k === 'tailTip') && !lean) table = table.filter(([a]) => a === 'none' || rng.chance(0.3)).concat([['none', 3]]);
+    if ((plan === 'slug' || plan === 'floater') && k === 'crest') table = table.filter(([a]) => ['none', 'frills', 'fin', 'plume'].includes(a)).concat([['none', 2]]);
     alleles[k] = table;
   }
   // body-plan specific numbers
   const legPairs = plan === 'centipede' ? rng.int(6, 11) : PLANS[plan].legs;
-  const covering = { mammal: 'fur', reptile: 'scales', bird: 'feathers', arthropod: 'chitin', lithosere: 'stone' }[family];
+  const covering = { mammal: 'fur', reptile: 'scales', bird: 'feathers', amphibian: 'skin', arthropod: 'chitin', mollusc: 'mantle', medusoid: 'membrane', lithosere: 'stone' }[family];
   const social = pickWeighted(rng, N.social);
   const groupSize = { solitary: [1, 1], pair: [2, 2], group: [3, 6], herd: [5, 11], flock: [6, 14], swarm: [8, 18], colony: [5, 12], pack: [3, 5], family: [2, 4] }[social];
   const size = lerp(N.size[0], N.size[1], mean[G.size]);
@@ -269,7 +353,7 @@ function makeSpecies(seed, layer, niche, index, names, used) {
       },
       lifespan: clamp(1400 + size * 700, 800, 5000),
       // creatures of the upper layers ignore explorers; only large deep hunters stalk them
-      playerAware: N.diet === 'carnivore' && size > 1.8 && layer.index >= 3 ? 'predator' : null,
+      playerAware: N.diet === 'carnivore' && size > 1.6 && layer.index >= 3 ? 'predator' : null,
     },
     call: callFor(rng, family, plan, size),
     relations: { prey: [], predators: [], competitors: [], symbiontOf: null, hosts: [], mobs: [], nestsNear: [] },
@@ -309,6 +393,10 @@ function makeSpecies(seed, layer, niche, index, names, used) {
 }
 
 function locoFor(plan, move) {
+  if (plan === 'floater') return 'drift';
+  if (plan === 'slug') return 'creep';
+  if (plan === 'crab') return 'scuttle';
+  if (plan === 'hopper') return 'hop';
   if (plan === 'avian' || plan === 'bat') return move === 'soar' ? 'soar' : move === 'hover' ? 'hover' : move === 'flutter' ? 'flutter' : 'fly';
   if (plan === 'insect' && move === 'hover') return 'hover';
   if (plan === 'glider') return 'glide';
@@ -323,6 +411,7 @@ function locoFor(plan, move) {
 /** Where the subspecies live: a rule mapping positions to a subspecies index. */
 function regionRule(layerId, niche, rng) {
   if (layerId === 'layer3') return { type: 'depth', cuts: [rng.range(-1250, -1350), rng.range(-1550, -1650)] };
+  if (layerId === 'layer4') return { type: 'depth', cuts: [rng.range(-2080, -2160), rng.range(-2280, -2380)] };
   if (layerId === 'layer2') return { type: 'tier' };
   if (layerId === 'surface') return { type: 'zone' };
   return { type: 'sector', phase: rng.range(0, Math.PI * 2) };
@@ -352,6 +441,7 @@ function callFor(rng, family, plan, size) {
     mammal: plan === 'bat' ? ['squeak', 'click', 'chitter'] : ['growl', 'bleat', 'hoot', 'bark', 'whistle', 'chitter'],
     reptile: ['hiss', 'croak', 'rattle', 'chirp'], bird: ['chirp', 'trill', 'caw', 'whistle', 'scream'],
     arthropod: ['click', 'buzz', 'chirr'], lithosere: ['grind', 'rumble', 'chime'],
+    amphibian: ['croak', 'peep', 'trill', 'burble'], mollusc: ['burble', 'hum', 'click'], medusoid: ['chime', 'hum', 'whistle', 'coo'],
   }[family];
   const type = rng.pick(types);
   const pitch = clamp((900 / (0.5 + size)) * rng.range(0.6, 1.5), 60, 4200);
@@ -360,11 +450,14 @@ function callFor(rng, family, plan, size) {
 
 // ------------------------------------------------------------------ names
 const NOUNS = {
-  mammal: { grazer: ['Grazer', 'Strider', 'Ruminant'], grazer_small: ['Hopper', 'Nibbler', 'Gnawer'], browser: ['Browser', 'Loper'], mesopredator: ['Prowler', 'Hound'], apex_predator: ['Ravager', 'Maw'], urban_small: ['Scurrier', 'Gnawer'], cliff_glider: ['Glider', 'Sailback'], cave_shrew: ['Shrew', 'Burrowmouse', 'Snuffler'], cave_ferret: ['Ferret', 'Tunnelcat', 'Mink'], chasm_bat: ['Bat', 'Flittermouse', 'Rift-bat'], chasm_fox: ['Flying Fox', 'Duskwing', 'Lantern-bat'], default: ['Beast', 'Loper'] },
-  reptile: { grazer: ['Plodder', 'Shellback'], browser: ['Longneck', 'Browser'], mesopredator: ['Runner', 'Snapjaw'], apex_predator: ['Tyrant', 'Drake'], cliff_glider: ['Kite-lizard', 'Glider'], ceiling_crawler: ['Gecko', 'Clinger'], ambush_predator: ['Lurker', 'Ambusher'], cave_skink: ['Skink', 'Crevice-lizard', 'Slatecrawler'], cave_gecko: ['Gecko', 'Lichen-licker', 'Glowtoe'], chasm_drake: ['Wall-drake', 'Cliff-dragon', 'Ledge-lizard'], urban_small: ['Lizard'], default: ['Lizard', 'Crawler'] },
-  bird: { urban_flier: ['Sparrow', 'Roofwing'], scavenger_flier: ['Vulture', 'Carrion-kite'], insectivore_flier: ['Swift', 'Flitter', 'Finch'], piscivore: ['Heron', 'Kingfisher'], pollinator: ['Hummer', 'Sipper'], mesopredator: ['Shrike', 'Talon'], apex_predator: ['Terror-bird', 'Hook-beak'], browser: ['Strider'], grazer_small: ['Quail'], chasm_swift: ['Swift', 'Cliff-swallow', 'Wallwing'], chasm_hawk: ['Rift-hawk', 'Falcon', 'Chasm-kite'], default: ['Bird'] },
-  arthropod: { pollinator: ['Moth', 'Bee', 'Drifter'], decomposer: ['Beetle', 'Mite', 'Borer'], ceiling_crawler: ['Weaver', 'Hangspider', 'Centipede'], ambush_predator: ['Trapjaw', 'Lurker'], insectivore_flier: ['Dart-wing'], default: ['Crawler', 'Skitter'] },
+  mammal: { grazer: ['Grazer', 'Strider', 'Ruminant'], grazer_small: ['Hopper', 'Nibbler', 'Gnawer'], browser: ['Browser', 'Loper'], mesopredator: ['Prowler', 'Hound'], apex_predator: ['Ravager', 'Maw'], urban_small: ['Scurrier', 'Gnawer'], cliff_glider: ['Glider', 'Sailback'], cave_shrew: ['Shrew', 'Burrowmouse', 'Snuffler'], rim_grazer: ['Mossback', 'Cup-grazer', 'Rimbeast'], goblet_wader: ['Stiltbeast', 'Wader'], goblet_stalker: ['Goblet-cat', 'Mistprowler'], vine_glider: ['Vine-glider', 'Mist-sugarglider'], spray_swift: ['Spray-bat'], cave_ferret: ['Ferret', 'Tunnelcat', 'Mink'], chasm_bat: ['Bat', 'Flittermouse', 'Rift-bat'], chasm_fox: ['Flying Fox', 'Duskwing', 'Lantern-bat'], default: ['Beast', 'Loper'] },
+  reptile: { grazer: ['Plodder', 'Shellback'], browser: ['Longneck', 'Browser'], mesopredator: ['Runner', 'Snapjaw'], apex_predator: ['Tyrant', 'Drake'], cliff_glider: ['Kite-lizard', 'Glider'], ceiling_crawler: ['Gecko', 'Clinger'], ambush_predator: ['Lurker', 'Ambusher'], cave_skink: ['Skink', 'Crevice-lizard', 'Slatecrawler'], cave_gecko: ['Gecko', 'Lichen-licker', 'Glowtoe'], rim_grazer: ['Mossback', 'Shell-grazer'], goblet_stalker: ['Rim-stalker', 'Falls-drake'], vine_glider: ['Vine-kite'], chasm_drake: ['Wall-drake', 'Cliff-dragon', 'Ledge-lizard'], urban_small: ['Lizard'], default: ['Lizard', 'Crawler'] },
+  bird: { urban_flier: ['Sparrow', 'Roofwing'], scavenger_flier: ['Vulture', 'Carrion-kite'], insectivore_flier: ['Swift', 'Flitter', 'Finch'], piscivore: ['Heron', 'Kingfisher'], pollinator: ['Hummer', 'Sipper'], mesopredator: ['Shrike', 'Talon'], apex_predator: ['Terror-bird', 'Hook-beak'], browser: ['Strider'], grazer_small: ['Quail'], chasm_swift: ['Swift', 'Cliff-swallow', 'Wallwing'], chasm_hawk: ['Rift-hawk', 'Falcon', 'Chasm-kite'], goblet_wader: ['Goblet-heron', 'Mist-stork'], spray_swift: ['Spray-swift', 'Falls-swallow'], default: ['Bird'] },
+  arthropod: { gallery_crab: ['Crab', 'Scuttler', 'Hermit'], lake_crab: ['Cup-crab', 'Rim-scuttler', 'Pool-crab'], pollinator: ['Moth', 'Bee', 'Drifter'], decomposer: ['Beetle', 'Mite', 'Borer'], ceiling_crawler: ['Weaver', 'Hangspider', 'Centipede'], ambush_predator: ['Trapjaw', 'Lurker'], insectivore_flier: ['Dart-wing'], default: ['Crawler', 'Skitter'] },
   lithosere: { grazer: ['Moss-golem', 'Plodder'], lithophage: ['Pebbler', 'Quarrier', 'Geode'], lithophage_large: ['Golem', 'Cairn', 'Crag-beast'], ambush_predator: ['Mimic-stone', 'Crag-maw'], default: ['Boulderling'] },
+  amphibian: { pond_hopper: ['Frog', 'Puddle-hopper', 'Peeper'], lake_hopper: ['Cup-frog', 'Lantern-toad', 'Splasher'], grazer_small: ['Hopper'], goblet_wader: ['Wade-newt', 'Stilt-toad'], rim_grazer: ['Moss-newt', 'Basin-axolotl'], goblet_stalker: ['Gulper', 'Mire-maw'], default: ['Newt', 'Salamander'] },
+  mollusc: { garden_snail: ['Snail', 'Shellkin'], moss_slug: ['Slug', 'Moss-creeper'], shell_creeper: ['Glass-snail', 'Lantern-slug', 'Whorl'], default: ['Slug'] },
+  medusoid: { spore_floater: ['Drifter', 'Puffball', 'Sporejelly'], mist_floater: ['Mist-jelly', 'Bellwisp', 'Lantern-medusa'], default: ['Drifter'] },
 };
 
 function commonName(rng, sp, used) {
@@ -408,7 +501,10 @@ export function generateSpecies(seed, names) {
     if (!def || !layer.implemented) continue;
     const rng = RNG.derive(seed, 'species', layer.id);
     const n = rng.int(def.n[0], def.n[1]);
-    const chosen = def.niches.slice(0, Math.min(n, def.niches.length));
+    // the first niches of a layer are always filled, the others drawn at random
+    const must = def.niches.slice(0, Math.min(def.must ?? n, n));
+    const rest = rng.shuffle(def.niches.slice(must.length));
+    const chosen = must.concat(rest.slice(0, Math.max(0, n - must.length)));
     while (chosen.length < n) chosen.push(rng.pick(def.niches));
     chosen.forEach((niche, i) => {
       const sp = makeSpecies(seed, layer, niche, i, names, used);
@@ -496,7 +592,7 @@ export function individualGenes(sp, rng, sub = 0, hybridWith = -1, hybridT = 0) 
     if (bias !== undefined && rng.chance(0.75)) a[k] = bias;
     else a[k] = rng.weighted(g.alleles[k]);
     // rare mutations: any allele of the trait
-    if (rng.chance(0.03) && !(k === 'ears' && g.alleles.ears.length === 1 && g.alleles.ears[0][0] === 'none') && k !== 'eyes') a[k] = rng.pick(ALLELES[k]);
+    if (rng.chance(0.03) && !(k === 'ears' && g.alleles.ears.length === 1 && g.alleles.ears[0][0] === 'none') && k !== 'eyes' && !FAMILY_ALLELES[k]) a[k] = rng.pick(ALLELES[k]);
   }
   return { c, a, sex: rng.chance(0.5) ? 'f' : 'm', sub, gen: 0 };
 }
@@ -527,11 +623,13 @@ export const DIET_TEXT = {
   insectivore: 'Feeds on small arthropods', scavenger: 'Scavenges carcasses', piscivore: 'Catches fish in open water',
   nectar: 'Drinks nectar from flowers', detritivore: 'Feeds on decaying matter', lithophage: 'Grinds and eats minerals and lichen',
   omnivore: 'Eats almost anything it can find', lichen: 'Grazes moss and lichen from the rock',
+  plankton: 'Sieves spores and drifting specks from the air',
 };
 
 export const LOCO_TEXT = {
   walk: 'walks', run: 'runs swiftly', hop: 'hops', fly: 'flies', soar: 'soars on rising air', hover: 'hovers', flutter: 'flutters in erratic swarms',
   glide: 'glides between heights', climb: 'climbs sheer rock', ceiling: 'clings to ceilings and overhangs', slither: 'slithers', roll: 'rolls its body like a boulder',
+  drift: 'drifts through the air, pulsing its bell', creep: 'creeps on a gliding foot', scuttle: 'scuttles sideways',
 };
 
 export const HABITAT_TEXT = {
@@ -546,8 +644,9 @@ export function describeAppearance(sp) {
   const body = {
     quadruped: 'four-legged', biped: 'bipedal', sprawler: 'low, sprawling', serpent: 'legless, serpentine', avian: 'winged', bat: 'bat-winged',
     glider: 'membrane-gliding', insect: 'six-legged', spider: 'eight-legged', centipede: 'many-legged', golem: 'stone-bodied', roller: 'boulder-like',
+    hexapod: 'six-legged', strider: 'long-legged', hopper: 'hopping', crab: 'clawed, side-walking', slug: 'soft-bodied, gliding', floater: 'floating, bell-shaped',
   }[sp.plan];
-  const cover = { fur: 'fur', scales: 'scales', feathers: 'feathers', chitin: 'a chitinous shell', stone: 'stony plates' }[sp.covering];
+  const cover = { fur: 'fur', scales: 'scales', feathers: 'feathers', chitin: 'a chitinous shell', stone: 'stony plates', skin: 'smooth, moist skin', mantle: 'a soft mantle', membrane: 'a translucent membrane' }[sp.covering];
   const pat = top('pattern');
   const parts = [];
   const crest = top('crest'), horns = top('horns'), tail = top('tailTip');

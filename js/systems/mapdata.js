@@ -109,6 +109,7 @@ export class MapData {
       if (above < top + 40) flags |= F_CAVE;
     }
     if (!(B.flags[k] & F_EXPLORED)) B.count++;
+    B.dirty = true;
     B.flags[k] = flags;
     B.version++;
   }
@@ -165,6 +166,8 @@ export class MapData {
   serialize() {
     const out = { trail: Array.from(this.trail, (v) => Math.round(v)), bands: [] };
     for (const B of this.bands) {
+      // bands unchanged since the last save reuse their packed form (autosaves stay cheap)
+      if (B.packed && !B.dirty) { out.bands.push(B.packed); continue; }
       // explored cells: run lengths of the explored mask, then packed data
       const runs = [];
       let cur = 0, len = 0;
@@ -186,7 +189,9 @@ export class MapData {
         bytes[i * 4] = d & 255; bytes[i * 4 + 1] = (d >> 8) & 255;
         bytes[i * 4 + 2] = B.mat[k]; bytes[i * 4 + 3] = B.flags[k];
       });
-      out.bands.push({ runs, data: toBase64(bytes) });
+      B.packed = { runs, data: toBase64(bytes) };
+      B.dirty = false;
+      out.bands.push(B.packed);
     }
     return out;
   }

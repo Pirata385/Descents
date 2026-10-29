@@ -1,7 +1,7 @@
 // Small turntable renderer for catalog entries (creatures and artifacts).
 // One WebGL context is shared by every preview and moved between panels.
 import * as THREE from 'three';
-import { buildCreature } from '../creatures/bodyMesh.js';
+import { buildCreature } from '../creatures/body.js';
 import { Animator } from '../creatures/motion.js';
 import { typicalPhenotype } from '../creatures/anatomy.js';
 import { buildArtifactModel } from '../artifacts/artifactMesh.js';

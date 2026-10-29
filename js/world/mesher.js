@@ -12,6 +12,7 @@ import { clamp, smoothstep, mixRGB } from '../core/mathutil.js';
 import { Z_EYE, Z_BOWL, Z_CITY, Z_COUNTRY, Z_SEA } from './field.js';
 import { LAYER_BOUNDARIES } from './layers.js';
 import { SpatialGrid } from './spatial.js';
+import { SPLIT_Y } from './goblets.js';
 
 // Layer 3 rock colours by depth: pale limestone, granite grey, cool abyssal limestone
 const L3_UPPER = [0.6, 0.58, 0.54];
@@ -90,11 +91,18 @@ export class ChunkMesher {
     if (L <= 1) this.vegetateColumns(L, step, foliage);
     if (L <= 3) this.placeFeatures(L, step, q0, r0, foliage, colliders);
     if (L <= 1) this.placeDecor(L, step, q0, r0, foliage);
-    const out = {
-      L, cq, cr,
-      terrain: terrain.export(), water: water.export(), falls: falls.export(), foliage: foliage.export(),
-      colliders,
-    };
+    const out = { L, cq, cr, colliders };
+    // the deep (Layer 4) part of a chunk becomes meshes of its own, drawn only near it
+    let deep = false;
+    for (let i = 0; i < this.cols.length && !deep; i++) { const c = this.cols[i]; if (c.n && c.y1[0] < SPLIT_Y) deep = true; }
+    if (deep) {
+      [out.terrain, out.terrainDeep] = terrain.exportSplit(SPLIT_Y);
+      [out.water, out.waterDeep] = water.exportSplit(SPLIT_Y);
+      [out.falls, out.fallsDeep] = falls.exportSplit(SPLIT_Y);
+      [out.foliage, out.foliageDeep] = foliage.exportSplit(SPLIT_Y);
+    } else {
+      out.terrain = terrain.export(); out.water = water.export(); out.falls = falls.export(); out.foliage = foliage.export();
+    }
     if (L === 0) out.spans = this.exportSpans(q0, r0);
     return out;
   }
@@ -283,6 +291,8 @@ export class ChunkMesher {
       // split into bands so colours/lighting vary with height
       const cuts = [sa];
       if (natural && grassy) { if (b - 0.35 > sa && b - 0.35 < sb) cuts.push(b - 0.35); if (b - 1.6 > sa && b - 1.6 < sb) cuts.push(b - 1.6); }
+      // faces never straddle the deep split (see build)
+      if (sa < SPLIT_Y && sb > SPLIT_Y) cuts.push(SPLIT_Y);
       // strata are coloured in the shader; only split very tall faces for depth tint
       const maxSeg = natural ? 60 : 12;
       let t = cuts[cuts.length - 1];
@@ -509,6 +519,19 @@ export class ChunkMesher {
               const s = 0.35 + r2 * 0.8;
               xf.set(c.x + ox, top - 0.15, c.z + oz, yaw, s, s * 0.7, s);
               emitTemplate(buf, F.paleRocks[Math.floor(r3 * F.paleRocks.length)], xf, [0.95, 0.95, 0.94], ex, 1, 0);
+            }
+          } else if (mat === M.GOBMOSS) {
+            // the mossy rims and floors of Layer 4: moss, ferns and glowing mushrooms
+            if (r1 < 0.3 * (lod1 ? 0.3 : 1)) {
+              xf.set(c.x + ox, top, c.z + oz, yaw, 1, 0.8 + r3 * 0.6, 1);
+              emitTemplate(buf, F.moss[Math.floor(r2 * F.moss.length)], xf, [0.75, 1.05, 1.1], ex, 1, 1);
+            } else if (r1 < 0.36) {
+              xf.set(c.x - ox, top, c.z - oz, yaw, 1, 1, 1);
+              emitTemplate(buf, F.glowMush[Math.floor(r2 * F.glowMush.length)], xf, [0.8, 1, 1.15], ex, 1, 1);
+            } else if (r1 < 0.39) {
+              const s = 0.8 + r3 * 0.8;
+              xf.set(c.x, top, c.z, yaw, s, s, s);
+              emitTemplate(buf, F.ferns[Math.floor(r2 * F.ferns.length)], xf, [0.7, 0.95, 1.05], ex, 1, 1);
             }
           } else if (mat === M.CRYSTAL) {
             // nothing extra

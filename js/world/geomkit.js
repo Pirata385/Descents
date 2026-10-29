@@ -78,6 +78,45 @@ export class MeshBuffer {
     };
   }
 
+  /**
+   * Export as two buffers, the triangles above ySplit and those below it (by
+   * centroid), so the parts of a chunk deep under everything can be drawn apart.
+   */
+  exportSplit(ySplit) {
+    if (this.n === 0) return [null, null];
+    const P = this.pos, I = this.idx, ni = this.ni;
+    const lo = new Uint8Array(ni / 3);
+    let below = 0;
+    for (let t = 0, k = 0; t < ni; t += 3, k++) {
+      if (P[I[t] * 3 + 1] + P[I[t + 1] * 3 + 1] + P[I[t + 2] * 3 + 1] < ySplit * 3) { lo[k] = 1; below++; }
+    }
+    if (below === 0) return [this.export(), null];
+    if (below * 3 === ni) return [null, this.export()];
+    const part = (want) => {
+      const map = new Int32Array(this.n).fill(-1);
+      const idx = [];
+      let nv = 0;
+      for (let t = 0, k = 0; t < ni; t += 3, k++) {
+        if (lo[k] !== want) continue;
+        for (let q = 0; q < 3; q++) { const v = I[t + q]; if (map[v] < 0) map[v] = nv++; idx.push(map[v]); }
+      }
+      const out = new MeshBuffer(Math.max(1, nv), this.withSway);
+      for (let v = 0; v < this.n; v++) {
+        const m = map[v];
+        if (m < 0) continue;
+        out.pos.set(this.pos.subarray(v * 3, v * 3 + 3), m * 3);
+        out.nrm.set(this.nrm.subarray(v * 3, v * 3 + 3), m * 3);
+        out.col.set(this.col.subarray(v * 3, v * 3 + 3), m * 3);
+        out.lit.set(this.lit.subarray(v * 4, v * 4 + 4), m * 4);
+        if (this.withSway) out.sway[m] = this.sway[v];
+      }
+      out.n = nv;
+      out.idx = Uint32Array.from(idx); out.ni = idx.length; out.icap = idx.length;
+      return out.export();
+    };
+    return [part(0), part(1)];
+  }
+
   transferables(out) {
     if (!out) return [];
     const t = [out.pos.buffer, out.nrm.buffer, out.col.buffer, out.lit.buffer, out.idx.buffer];

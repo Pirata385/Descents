@@ -515,9 +515,18 @@ export function planFaultCaves(ctx) {
   const SINK_STYLES = ['traverse', 'switchback', 'corkscrew', 'traverse', 'switchback', 'corkscrew'];
   const addSink = (sk, nodes, hubIndex) => {
     const target = hubs[hubIndex];
-    const crater = { x: sk.x, y: sk.y - 2.6 + 0.55 * 9, z: sk.z, r: 9, fy: sk.y - 2.6 };
-    // the first nodes may lie above the plain floor: that is the open trench of the sinkhole
-    sk.cave = makeCave('sinkhole', '', [crater, ...nodes.slice(1), hubNode(target)], { from: 'plain', to: `hall${hubIndex}` });
+    const crater = { x: sk.x, y: sk.y - 2.6 + 0.55 * 11, z: sk.z, r: 11, fy: sk.y - 2.6 };
+    // a wide open cutting leads from the crater down to a big dark mouth where the rock
+    // closes over it, so the way in reads from across the plain (same floor, more room)
+    const MOUTH = [4.8, 4.6, 4.3, 3.9, 3.5];
+    for (let k = 1; k <= MOUTH.length && k < nodes.length - 1; k++) {
+      const nd = nodes[k];
+      const floor = nd.y - 0.55 * nd.r;
+      if (MOUTH[k - 1] > nd.r) { nd.r = MOUTH[k - 1]; nd.y = floor + 0.55 * nd.r; }
+    }
+    // the first nodes may lie above the plain floor: that is the open trench of the sinkhole;
+    // its floor is a worn trail all the way down to the first hall
+    sk.cave = makeCave('sinkhole', '', [crater, ...nodes.slice(1), hubNode(target)], { from: 'plain', to: `hall${hubIndex}`, mat: CAVE_MAT.ENTRY });
     sk.cave.sinkhole = true;
     sk.hall = hubIndex;
     res.sinkholes.push(sk);
@@ -661,7 +670,7 @@ export function planFaultCaves(ctx) {
     let dx = nx.x - sk.x, dz = nx.z - sk.z;
     const dl = Math.hypot(dx, dz) || 1;
     dx /= dl; dz /= dl;
-    const px = -dz, pz = dx, rr = 9 + 3.5;
+    const px = -dz, pz = dx, rr = 11 + 3.5;
     const mr = RNG.derive(params.seed, 'sinkmark', i);
     const top = mr.range(8.5, 11);
     res.prims.push(arch(sk.x + px * rr, sk.z + pz * rr, { bx: sk.x - px * rr, bz: sk.z - pz * rr, y0: sk.y - 1.5, yb: sk.y - 1.5, bulge: top, thick: mr.range(1.8, 2.4), width: mr.range(2.0, 2.6), top: M.RUIN, side: M.RUIN }));
@@ -671,9 +680,30 @@ export function planFaultCaves(ctx) {
       // leave the way into the passage and the feet of the arch clear
       const rel = Math.abs(wrapAngle(a - Math.atan2(dz, dx)));
       if (rel < 0.65 || Math.abs(rel - Math.PI / 2) < 0.35) continue;
-      const sr = 9 + mr.range(5.5, 8);
+      const sr = 11 + mr.range(5.5, 8);
       const sx = sk.x + Math.cos(a) * sr, sz = sk.z + Math.sin(a) * sr;
-      res.prims.push(cyl(OP_ADD, sx, sz, { r: mr.range(0.6, 0.95), y0: sk.y - 1, y1: sk.y + mr.range(2.4, 4.6), top: M.RUIN, side: M.RUIN }));
+      const st = sk.y + mr.range(2.4, 4.6);
+      res.prims.push(cyl(OP_ADD, sx, sz, { r: mr.range(0.6, 0.95), y0: sk.y - 1, y1: st, top: M.RUIN, side: M.RUIN }));
+      // a glowing crystal set in each stone: the ring shines across the plain at night
+      res.prims.push(cyl(OP_ADD, sx, sz, { r: 0.35, y0: st - 0.2, y1: st + 0.9, top: M.CRYSTAL, side: M.CRYSTAL }));
+    }
+    // two tall crystal beacons flank the arch
+    for (const s of [-1, 1]) res.prims.push(cyl(OP_ADD, sk.x + px * (rr + 1.6) * s, sk.z + pz * (rr + 1.6) * s, { r: 0.45, y0: sk.y - 1, y1: sk.y + mr.range(5, 6.5), top: M.CRYSTAL, side: M.CRYSTAL }));
+    // crystal lanterns set into the floor along the trail, every dozen metres, on alternate sides
+    {
+      let along = 0, next = 6, side = 1;
+      for (let k = 1; k < nd.length - 1; k++) {
+        const a0 = nd[k - 1], b0 = nd[k];
+        along += Math.hypot(b0.x - a0.x, b0.z - a0.z);
+        if (along < next) continue;
+        next = along + 12;
+        const tx = b0.x - a0.x, tz = b0.z - a0.z, tl = Math.hypot(tx, tz) || 1;
+        const off = b0.r * 0.62;
+        const lx = b0.x + (-tz / tl) * off * side, lz = b0.z + (tx / tl) * off * side;
+        const floor = b0.y - 0.55 * Math.sqrt(Math.max(0, b0.r * b0.r - off * off));
+        res.prims.push(cyl(OP_ADD, lx, lz, { r: 0.28, y0: floor - 0.4, y1: floor + 0.9, top: M.CRYSTAL, side: M.CRYSTAL, maxLod: 1 }));
+        side = -side;
+      }
     }
   });
 
@@ -740,9 +770,9 @@ export function planFaultCaves(ctx) {
     const hallR = 12;
     const hall = { x: end.x + ux * 8, z: end.z + uz * 8, r: hallR, fy: end.fy, y: end.fy + 0.55 * hallR };
     nodes.push(hall);
-    const cave = makeCave('gate', 'The Fourth Gate', nodes, { mat: CAVE_MAT.DEEP, from: 'basin', to: 'layer4' });
+    const cave = makeCave('gate', 'The Fourth Gate', nodes, { mat: CAVE_MAT.DEEP, from: 'basin', to: 'gatehall' });
     cave.chambers.push(nodes.length - 1);
-    // pillars and lintel framing the doorway, a sealed door at the back of the hall
+    // pillars and lintel framing the doorway; at the back of the hall the way goes on down
     const gx = cx + ux * (Rg - 1.2), gz = cz + uz * (Rg - 1.2);
     const ang = Math.atan2(uz, ux);
     for (const sd of [-1, 1]) {
@@ -751,11 +781,52 @@ export function planFaultCaves(ctx) {
       res.prims.push(spire(gx + px * sd * 9.5 - ux * 3, gz + pz * sd * 9.5 - uz * 3, { r: 1.4, y0: fy0, h: 6.5, top: M.CRYSTAL, side: M.CRYSTAL }));
     }
     res.prims.push(box(OP_ADD, gx, gz, { angle: ang + Math.PI / 2, hw: 8.2, hd: 1.8, y0: fy0 + 14.5, y1: fy0 + 18, top: M.RUIN2, side: M.RUIN2, maxLod: 3 }));
-    const dx = hall.x + ux * (hallR - 3), dz = hall.z + uz * (hallR - 3);
-    res.prims.push(box(OP_ADD, dx, dz, { angle: ang + Math.PI / 2, hw: 6, hd: 1.2, y0: hall.fy - 1, y1: hall.fy + 11, top: M.RUIN2, side: M.RUIN2, maxLod: 3 }));
-    res.prims.push(cyl(OP_ADD, dx - ux * 1.3, dz - uz * 1.3, { r: 3.2, y0: hall.fy + 1.5, y1: hall.fy + 8, top: M.CRYSTAL, side: M.CRYSTAL, maxLod: 2 }));
     res.prims.push(dome(hall.x - ux * 4, hall.z - uz * 4, { r: 2.6, y0: hall.fy - 0.2, h: 0.9, top: M.RUIN2, side: M.RUIN2 }));
     res.gate = { x: hall.x - ux * 2, y: hall.fy, z: hall.z - uz * 2, mouth: { x: front.x, y: fy0, z: front.z }, phi: phiG, name: 'The Fourth Gate' };
+    // The Gate Stair: from the back of the hall a corkscrew winds down through the rock and
+    // opens high in the wall of the cavern of Layer 4 (see goblets.js), where the first
+    // goblet's rim waits at the door. The path makes whole and half turns so it leaves
+    // the helix heading away from the hall.
+    {
+      const lrS = RNG.derive(params.seed, 'gatestair');
+      const drop = lrS.range(70, 78);
+      const exitFy = hall.fy - drop;
+      let made = null;
+      for (let attempt = 0; attempt < 12 && !made; attempt++) {
+        const side = attempt % 2 ? -1 : 1;
+        const hr = 11 + attempt * 0.9;
+        const hcx = hall.x + ux * (hallR + hr + 2), hcz = hall.z + uz * (hallR + hr + 2);
+        const a0 = Math.atan2(hall.z - hcz, hall.x - hcx);
+        let m = 0, total = 0;
+        for (m = 0; m < 6; m++) { total = hr * (Math.PI + TAU * m); if (drop / total <= 0.33) break; }
+        const n = Math.ceil(total / STEP);
+        const nodes2 = [hubNode(hall)];
+        for (let k = 1; k <= n; k++) {
+          const sArc = (k / n) * total;
+          const a = a0 + side * sArc / hr;
+          const fy = hall.fy - drop * (k / n);
+          nodes2.push({ x: hcx + Math.cos(a) * hr, z: hcz + Math.sin(a) * hr, fy, y: fy + 0.55 * 3.2, r: 3.2 });
+        }
+        const last = nodes2[nodes2.length - 1];
+        for (let k = 1; k <= 4; k++) {
+          const t = k / 4;
+          nodes2.push({ x: last.x + ux * 16 * t, z: last.z + uz * 16 * t, fy: exitFy, y: exitFy + 0.55 * 3.6, r: 3.6 });
+        }
+        if (!clearAll(nodes2.slice(2), 2, { exceptCave: cave })) continue;
+        made = nodes2;
+      }
+      if (made) {
+        const end = made[made.length - 1];
+        makeCave('fault', 'The Gate Stair', made, { from: 'gatehall', to: 'layer4', mat: CAVE_MAT.DEEP });
+        // two crystal-capped pillars mark where the stair leaves the hall
+        const sx = hall.x + ux * (hallR - 2), sz = hall.z + uz * (hallR - 2);
+        for (const sd of [-1, 1]) {
+          res.prims.push(box(OP_ADD, sx + px * sd * 4.4, sz + pz * sd * 4.4, { angle: ang, hw: 0.9, hd: 0.9, y0: hall.fy - 1, y1: hall.fy + 7, top: M.RUIN2, side: M.RUIN2, maxLod: 3 }));
+          res.prims.push(cyl(OP_ADD, sx + px * sd * 4.4, sz + pz * sd * 4.4, { r: 0.6, y0: hall.fy + 7, y1: hall.fy + 8.6, top: M.CRYSTAL, side: M.CRYSTAL, maxLod: 2 }));
+        }
+        res.gateStair = { x: end.x + ux * 1.2, z: end.z + uz * 1.2, y: exitFy, ux, uz };
+      }
+    }
   }
 
   // ------------------------------------------------------------ hall chambers
@@ -826,6 +897,57 @@ export function planFaultCaves(ctx) {
     }
   });
 
+  // ------------------------------------------------------------ natural windows along the passages
+  // Wherever a passage runs close behind the chasm wall, the rock has broken
+  // through: a short opening with a sill looks out over the void, lets the pale
+  // light of the tube into the caves and shows how far down the way has come.
+  {
+    const legs = res.caves.filter((cv) => cv.kind === 'fault' || cv.kind === 'sinkhole');
+    let wcount = 0;
+    legs.forEach((cv, li) => {
+      const lr = RNG.derive(params.seed, 'nwindow', li);
+      let along = 0, lastAt = -18, made = 0;
+      for (let k = 2; k < cv.nodes.length - 2 && made < 4; k++) {
+        const nd = cv.nodes[k], pv = cv.nodes[k - 1];
+        along += Math.hypot(nd.x - pv.x, nd.z - pv.z);
+        if (along - lastAt < 24) continue;
+        const fy = nd.y - 0.55 * nd.r;
+        if (fy > params.plainY - 25 || fy < c.floorY + 30) continue;
+        const [cx, cz] = centre(fy + 2);
+        const dx0 = nd.x - cx, dz0 = nd.z - cz, rn = Math.hypot(dx0, dz0);
+        const phi = Math.atan2(dz0, dx0);
+        const Rw = chasm.wallDist(phi, fy + 1.5);
+        if (Rw <= 0) continue;
+        const thick = rn - Rw;
+        if (thick < nd.r + 1.5 || thick > 34) continue;
+        // a sound sill: the wall under the opening is not undercut
+        if (chasm.wallDist(phi, fy - 2) > Rw + 2 || chasm.wallDist(phi, fy - 6) > Rw + 5) continue;
+        const r = lr.range(1.9, 2.6);
+        const sill = fy + lr.range(0.3, 0.7);
+        const ux = dx0 / rn, uz = dz0 / rn;
+        const nodes = [{ x: nd.x, y: nd.y, z: nd.z, r: nd.r }];
+        // the axis stops just inside the wall (its floor stays on rock); the end of the bore breaks through
+        const len = thick - 0.8;
+        const n = Math.max(2, Math.ceil(len / 3.5));
+        let ok = true;
+        for (let q = 1; q <= n; q++) {
+          const t = q / n;
+          const w = { x: nd.x - ux * len * t, z: nd.z - uz * len * t, r: r * (q === n ? 1.35 : 1), fy: sill, y: 0 };
+          w.y = sill + 0.55 * w.r;
+          nodes.push(w);
+          const dist = len * t;
+          if (dist > nd.r + 1 && dist < thick - 1.5 && !clearAll([w], 1.5, { exceptCave: cv })) ok = false;
+        }
+        if (!ok) continue;
+        const name = `${names.name('loophole', wcount)} Window`;
+        makeCave('window', name, nodes, { from: cv.from, to: 'chasm' });
+        const ox = cx + ux * (Rw - 1), oz = cz + uz * (Rw - 1);
+        res.windows.push({ x: ox, y: sill, z: oz, phi, name, natural: true, minor: true });
+        lastAt = along; made++; wcount++;
+      }
+    });
+  }
+
   // ------------------------------------------------------------ dens: dead-end burrows for cave fauna
   const denNames = ['Den', 'Burrow', 'Warren', 'Lair', 'Nook'];
   hubs.forEach((h, i) => {
@@ -892,7 +1014,7 @@ export function planFaultCaves(ctx) {
   // ------------------------------------------------------------ names, landmarks and artifact sites
   for (const s of res.sinkholes) res.landmarks.push({ type: 'sinkhole', name: s.name, x: s.x, z: s.z, y: s.y, layer: 2 });
   hubs.forEach((h, i) => { if (i % 2 === 0 || h.last) res.landmarks.push({ type: 'hall', name: h.name, x: h.x, z: h.z, y: h.fy, layer: h.fy < -1900 ? 4 : 3 }); });
-  for (const w of res.windows) res.landmarks.push({ type: 'window', name: w.name, x: w.x, z: w.z, y: w.y, layer: 3 });
+  for (const w of res.windows) res.landmarks.push({ type: 'window', name: w.name, x: w.x, z: w.z, y: w.y, layer: 3, minor: !!w.minor });
   const rook = res.shelves.filter((s) => s.rookery).slice(0, 3);
   rook.forEach((s, i) => { s.name = `${names.name('rookery', i)} Rookery`; res.landmarks.push({ type: 'rookery', name: s.name, x: s.x, z: s.z, y: s.y, layer: 3 }); });
   res.landmarks.push({ type: 'basin', name: res.basin.name, x: res.basin.x, z: res.basin.z, y: res.basin.y, layer: 4 });
@@ -900,7 +1022,7 @@ export function planFaultCaves(ctx) {
 
   hubs.forEach((h, i) => { if (i % 3 === 1) res.sites.push({ x: h.x, z: h.z, y: h.fy, layer: 3, context: 'in the dark of a great cave hall', place: h.name, kind: 'cave' }); });
   for (const d of res.dens) res.sites.push({ x: d.x, z: d.z, y: d.y, layer: 3, context: d.crawl ? 'at the end of a tight crawlway' : 'in a burrow strewn with bones', place: d.name, kind: 'den' });
-  for (const w of res.windows) res.sites.push({ x: w.x, z: w.z, y: w.y, layer: 3, context: 'on a balcony above the void', place: w.name, kind: 'window' });
+  for (const w of res.windows) if (!w.natural) res.sites.push({ x: w.x, z: w.z, y: w.y, layer: 3, context: 'on a balcony above the void', place: w.name, kind: 'window' });
   for (const s of rook) res.sites.push({ x: s.x, z: s.z, y: s.y, layer: 3, context: 'among the nests of a rookery ledge', place: s.name, kind: 'nest' });
   if (res.gate) res.sites.push({ x: res.gate.x, z: res.gate.z, y: res.gate.y, layer: 4, context: 'before the sealed Fourth Gate', place: res.gate.name, kind: 'gate' });
   return res;

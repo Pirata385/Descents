@@ -15,16 +15,38 @@ export const CATEGORY_LABEL = {
 };
 
 const ARCHETYPES = {
-  tool: ['hammer', 'chisel', 'pick', 'compass', 'key'],
-  relic: ['orb', 'tablet', 'idolHead', 'crown'],
-  amulet: ['ring', 'pendant', 'torc'],
+  tool: ['hammer', 'chisel', 'pick', 'compass', 'key', 'lantern'],
+  relic: ['orb', 'tablet', 'idolHead', 'crown', 'eye', 'mirror'],
+  amulet: ['ring', 'pendant', 'torc', 'feather', 'claw'],
   equipment: ['gauntlet', 'buckle', 'visor', 'boot'],
-  mechanical: ['gears', 'clockwork', 'gyro'],
-  scientific: ['lens', 'astrolabe', 'flask', 'prism'],
-  weapon: ['blade', 'spearhead', 'aegis'],
-  organic: ['seedpod', 'shell', 'heartstone', 'coral'],
-  unknown: ['knot', 'cubes', 'halo', 'tetra'],
-  ritual: ['bowl', 'figurine', 'bell', 'mask'],
+  mechanical: ['gears', 'clockwork', 'gyro', 'caster'],
+  scientific: ['lens', 'astrolabe', 'flask', 'prism', 'spindle'],
+  weapon: ['blade', 'spearhead', 'aegis', 'lance', 'caster', 'maul', 'flail', 'shardbow'],
+  organic: ['seedpod', 'shell', 'heartstone', 'coral', 'horn'],
+  unknown: ['knot', 'cubes', 'halo', 'tetra', 'cage'],
+  ritual: ['bowl', 'figurine', 'bell', 'mask', 'censer'],
+};
+
+/**
+ * Weapons. kind: melee (a swing that hits what is in front), shot (projectiles)
+ * or beam (a continuous ray that heats up the weapon). Damage per hit or per second.
+ */
+export const WEAPONS = {
+  pick: { label: "Delver's pick", kind: 'melee', dmg: 8, rate: 0.55, range: 2.6, arc: 0.55, knock: 2.2 },
+  blade: { label: 'Blade', kind: 'melee', dmg: 11, rate: 0.36, range: 2.9, arc: 0.95, knock: 1.6, sweep: true },
+  spear: { label: 'Spear', kind: 'melee', dmg: 17, rate: 0.68, range: 4.4, arc: 0.28, knock: 3.2 },
+  hammer: { label: 'Maul', kind: 'melee', dmg: 26, rate: 1.05, range: 2.7, arc: 0.7, knock: 7, stun: 0.9, sweep: true },
+  whip: { label: 'Chain flail', kind: 'melee', dmg: 10, rate: 0.48, range: 5.8, arc: 0.5, knock: -2.5, sweep: true },
+  bolt: { label: 'Bolt caster', kind: 'shot', dmg: 15, rate: 0.55, speed: 60, count: 1, spread: 0.008, grav: 2.5 },
+  shard: { label: 'Shard caster', kind: 'shot', dmg: 6, rate: 0.8, speed: 48, count: 6, spread: 0.07, grav: 5 },
+  gamma: { label: 'Gamma lance', kind: 'beam', dps: 42, range: 70, heat: 26, cool: 20 },
+};
+const WEAPON_OF = { blade: 'blade', spearhead: 'spear', lance: 'gamma', caster: 'bolt', maul: 'hammer', flail: 'whip', shardbow: 'shard', hammer: 'hammer', pick: 'pick' };
+export const ELEMENTS = {
+  ember: { label: 'Ember', desc: 'sets the struck alight' },
+  frost: { label: 'Frost', desc: 'chills and slows the struck' },
+  spark: { label: 'Spark', desc: 'arcs to a second creature nearby' },
+  venom: { label: 'Venom', desc: 'poisons the struck' },
 };
 const NOUNS = {
   hammer: 'Hammer', chisel: 'Chisel', pick: 'Pick', compass: 'Compass', key: 'Key', orb: 'Orb', tablet: 'Tablet', idolHead: 'Idol', crown: 'Crown',
@@ -32,6 +54,8 @@ const NOUNS = {
   clockwork: 'Clockwork', gyro: 'Gyroscope', lens: 'Lens', astrolabe: 'Astrolabe', flask: 'Phial', prism: 'Prism', blade: 'Blade',
   spearhead: 'Spearhead', aegis: 'Aegis', seedpod: 'Seedpod', shell: 'Shell', heartstone: 'Heartstone', coral: 'Coral', knot: 'Knot',
   cubes: 'Nested Cube', halo: 'Halo', tetra: 'Tetrahedron', bowl: 'Bowl', figurine: 'Figurine', bell: 'Bell', mask: 'Mask',
+  lantern: 'Lantern', eye: 'Eye', mirror: 'Mirror', feather: 'Plume', claw: 'Talon', caster: 'Caster', spindle: 'Spindle',
+  lance: 'Lance', maul: 'Maul', flail: 'Flail', shardbow: 'Shardbow', horn: 'Horn', cage: 'Cage', censer: 'Censer',
 };
 
 export const MATERIALS = {
@@ -79,6 +103,15 @@ export const EFFECTS = {
   vigor: { label: 'Vigor', desc: (m) => `Health regeneration +${m.toFixed(1)}/s`, range: [0.3, 2.0], adj: ['Living', 'Warm'] },
   cartographer: { label: 'Wayfinding', desc: (m) => `Map reveal radius +${Math.round(m * 100)}%`, range: [0.2, 0.8], adj: ["Wanderer's", 'Pathfinding'] },
   swim: { label: 'Current', desc: (m) => `Swimming speed +${Math.round(m * 100)}%`, range: [0.2, 0.8], adj: ['Tidal', 'River'] },
+  armor: { label: 'Bulwark', desc: (m) => `Damage taken -${Math.round(m * 100)}%`, range: [0.08, 0.4], adj: ['Warding', 'Stalwart', 'Iron-skinned'] },
+  might: { label: 'Might', desc: (m) => `Weapon damage +${Math.round(m * 100)}%`, range: [0.1, 0.6], adj: ['Mighty', 'Fierce', 'Sundering'] },
+  haste: { label: 'Haste', desc: (m) => `Attack speed +${Math.round(m * 100)}%`, range: [0.08, 0.45], adj: ['Quick', 'Flickering'] },
+  leech: { label: 'Leech', desc: (m) => `Heals ${Math.round(m * 100)}% of the damage dealt`, range: [0.04, 0.2], adj: ['Thirsting', 'Hungry'] },
+  thorns: { label: 'Thorns', desc: (m) => `Returns ${Math.round(m * 100)}% of the damage of a bite or strike`, range: [0.2, 0.9], adj: ['Bristling', 'Thorned'] },
+  tough: { label: 'Toughness', desc: (m) => `Maximum health +${Math.round(m)}`, range: [10, 60], adj: ['Hardy', 'Enduring'] },
+  wind: { label: 'Second Wind', desc: (m) => `Maximum stamina +${Math.round(m)}`, range: [10, 60], adj: ['Breathing', 'Tireless'] },
+  calm: { label: 'Calm', desc: (m) => `Creatures are ${Math.round(m * 100)}% less quick to anger`, range: [0.2, 0.7], adj: ['Soothing', 'Quiet'] },
+  darksight: { label: 'Darksight', desc: (m) => `Sees ${Math.round(m * 100)}% further in the dark`, range: [0.2, 0.8], adj: ['Owl-eyed', 'Gloam'] },
 };
 export const ABILITIES = {
   flare: { label: 'Flare', desc: 'Bursts with light that floods the surroundings for 25 s.', cooldown: [60, 25], adj: ['Blaze', 'Dawn'] },
@@ -86,6 +119,16 @@ export const ABILITIES = {
   pulse: { label: 'Echo Pulse', desc: 'Reveals every creature within 80 m and notes them in the catalog.', cooldown: [90, 35], adj: ['Echo', 'Resonant'] },
   glide: { label: 'Glide', desc: 'While held in the air, slows your fall to a glide.', cooldown: [0, 0], adj: ['Wing', 'Soaring'] },
   survey: { label: 'Survey', desc: 'Reveals the map in a 160 m radius.', cooldown: [120, 50], adj: ['Surveying', 'All-seeing'] },
+  // offensive
+  gamma: { label: 'Gamma Ray', desc: 'Looses a searing ray of light along the line of sight for 3 s; it pierces every creature in its path.', cooldown: [80, 30], adj: ['Searing', 'Radiant', 'Gamma'], kind: 'attack' },
+  shockwave: { label: 'Shockwave', desc: 'A blast around the bearer hurls creatures back and stuns them.', cooldown: [50, 18], adj: ['Thundering', 'Quaking'], kind: 'attack' },
+  thornburst: { label: 'Thornburst', desc: 'Crystal spikes burst from the ground ahead, wounding and pinning creatures.', cooldown: [55, 20], adj: ['Bristling', 'Crystal'], kind: 'attack' },
+  stasis: { label: 'Stasis', desc: 'Freezes the creatures in front of the bearer for 5 s.', cooldown: [70, 28], adj: ['Stilling', 'Frozen'], kind: 'attack' },
+  // defensive
+  aegis: { label: 'Aegis', desc: 'A shell of light absorbs damage for 10 s.', cooldown: [60, 22], adj: ['Shielding', 'Bastion'], kind: 'defend' },
+  phase: { label: 'Phase Step', desc: 'Dashes forward, untouchable for a moment.', cooldown: [20, 6], adj: ['Phasing', 'Ghost'], kind: 'defend' },
+  mend: { label: 'Mend', desc: 'Restores health over 6 s.', cooldown: [70, 30], adj: ['Mending', 'Healing'], kind: 'defend' },
+  repel: { label: 'Repel', desc: 'A pulse of dread sends every creature within 30 m fleeing.', cooldown: [60, 25], adj: ['Dreadful', 'Warding'], kind: 'defend' },
 };
 export const DRAWBACKS = {
   heavy: { label: 'Heavy', desc: (m) => `Movement speed -${Math.round(m * 100)}%`, range: [0.04, 0.12] },
@@ -123,9 +166,11 @@ export function generateArtifact(seed, id, site, names) {
   const layer = LAYERS[clamp(site.layer, 0, 4)];
   const rng = RNG.derive(seed, 'artifact', id);
   const pool = layer.artifacts || LAYERS[1].artifacts;
-  const category = pickWeighted(rng, pool.categories);
-  const grade = rng.weighted(pool.rarity.map((w, i) => [i, w]));
-  const archetype = rng.pick(ARCHETYPES[category]);
+  // the warden of the Throne Cup guards a lance of light
+  const throne = site.kind === 'throne';
+  const category = throne ? 'weapon' : pickWeighted(rng, pool.categories);
+  const grade = throne ? 4 : rng.weighted(pool.rarity.map((w, i) => [i, w]));
+  const archetype = throne ? 'lance' : rng.pick(ARCHETYPES[category]);
   const matKey = pickWeighted(rng, MAT_BY_CAT[category]);
   const mat = MATERIALS[matKey];
   const size = clamp(rng.range(0.12, 0.5) * (category === 'weapon' || category === 'tool' ? 1.4 : 1) * (archetype === 'crown' || archetype === 'aegis' ? 1.3 : 1), 0.08, 0.8);
@@ -140,8 +185,11 @@ export function generateArtifact(seed, id, site, names) {
     effects.push({ type: k, magnitude: m });
   }
   let ability = null;
-  if (grade >= 3 || (grade === 2 && rng.chance(0.35))) {
-    const k = rng.pick(Object.keys(ABILITIES));
+  if (throne || grade >= 3 || (grade === 2 && rng.chance(0.35)) || (category === 'weapon' && grade >= 1 && rng.chance(0.4))) {
+    // weapons lean to combat abilities, the rest to anything
+    const keys = Object.keys(ABILITIES);
+    const combat = keys.filter((k2) => ABILITIES[k2].kind);
+    const k = throne ? 'gamma' : archetype === 'aegis' ? 'aegis' : category === 'weapon' || (category === 'equipment' && rng.chance(0.5)) ? rng.pick(combat) : rng.pick(keys);
     const A = ABILITIES[k];
     const t = grade / 4;
     ability = { type: k, cooldown: Math.round(A.cooldown[0] + (A.cooldown[1] - A.cooldown[0]) * t), power: 0.6 + t * 0.8 };
@@ -152,6 +200,13 @@ export function generateArtifact(seed, id, site, names) {
     const D = DRAWBACKS[k];
     drawback = { type: k, magnitude: rng.range(D.range[0], D.range[1]) };
   }
+  // a weapon to wield: kind from the shape, power from the grade, sometimes an element
+  let weapon = null;
+  const wk = WEAPON_OF[archetype];
+  if (wk && (category === 'weapon' || category === 'mechanical' || rng.chance(0.6))) {
+    weapon = { type: wk, power: Math.round((1 + grade * 0.28 + rng.range(0, 0.2)) * 100) / 100, element: rng.chance(0.2 + grade * 0.12) ? rng.pick(Object.keys(ELEMENTS)) : null };
+  }
+  if (archetype === 'aegis' && !effects.some((e) => e.type === 'armor')) effects.push({ type: 'armor', magnitude: EFFECTS.armor.range[0] + (EFFECTS.armor.range[1] - EFFECTS.armor.range[0]) * grade / 4 });
   // name
   const noun = NOUNS[archetype];
   let adj;
@@ -170,7 +225,7 @@ export function generateArtifact(seed, id, site, names) {
     accent: [rng.range(0.2, 1), rng.range(0.2, 1), rng.range(0.2, 1)],
     size, weight: Math.round(size * size * (mat.metal > 0.5 ? 9 : 4) * 10) / 10,
     shape: shapeParams(RNG.derive(seed, 'artshape', id), archetype),
-    effects, ability, drawback, appearance, origin,
+    effects, ability, drawback, appearance, origin, weapon,
     site: { x: site.x, y: site.y, z: site.z, layer: site.layer, context: site.context, place: site.place, kind: site.kind },
   };
 }
@@ -192,12 +247,17 @@ export function generateArtifacts(seed, sites, names) {
     const want = layer?.artifacts?.count ?? 5;
     // prefer variety of site kinds
     rng.shuffle(list);
-    list.sort((a, b) => (a.kind === 'cave' ? 1 : 0) - (b.kind === 'cave' ? 1 : 0));
+    list.sort((a, b) => (a.kind === 'cave' ? 1 : 0) - (b.kind === 'cave' ? 1 : 0) + (b.reward ? 1 : 0) * 10 - (a.reward ? 1 : 0) * 10);
     for (const s of list.slice(0, want)) chosen.push(s);
   }
   return chosen.map((s, i) => generateArtifact(seed, i, s, names));
 }
 
 export function describeEffect(e) { return EFFECTS[e.type].desc(e.magnitude); }
+export function describeWeapon(w) {
+  const W = WEAPONS[w.type];
+  const what = W.kind === 'beam' ? `${Math.round(W.dps * w.power)} damage per second along a ${W.range} m ray (it heats up)` : W.kind === 'shot' ? `${W.count > 1 ? `${W.count} shards of ` : ''}${Math.round(W.dmg * w.power)} damage per shot` : `${Math.round(W.dmg * w.power)} damage per blow, ${W.range} m reach`;
+  return `${W.label}: ${what}${w.element ? ` · ${ELEMENTS[w.element].label} (${ELEMENTS[w.element].desc})` : ''}`;
+}
 export function describeAbility(a) { return `${ABILITIES[a.type].label}: ${ABILITIES[a.type].desc}${a.cooldown ? ` (recharges in ${a.cooldown} s)` : ''}`; }
 export function describeDrawback(d) { return `${DRAWBACKS[d.type].label}: ${DRAWBACKS[d.type].desc(d.magnitude)}`; }
