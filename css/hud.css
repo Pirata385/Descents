@@ -28,6 +28,39 @@
 .crosshair.attached .ch-ring { border-color: var(--gold); transform: scale(0.7); }
 .crosshair.zoom .ch-ring { width: 60px; height: 60px; left: -31px; top: -31px; border-color: rgba(255, 255, 255, 0.3); }
 .ch-dist { position: absolute; left: 16px; top: 8px; font-size: 11px; opacity: 0.7; white-space: nowrap; }
+/* hit marker: four ticks around the dot, red when the blow kills */
+.ch-hit { position: absolute; width: 20px; height: 20px; left: -10px; top: -10px; opacity: 0; transition: opacity 0.08s;
+  background: linear-gradient(45deg, transparent 46%, #fff 46%, #fff 54%, transparent 54%), linear-gradient(-45deg, transparent 46%, #fff 46%, #fff 54%, transparent 54%);
+  -webkit-mask-image: radial-gradient(circle, transparent 5px, #000 6px); mask-image: radial-gradient(circle, transparent 5px, #000 6px); }
+.crosshair.hit .ch-hit { opacity: 0.9; }
+.crosshair.kill .ch-hit { opacity: 1; width: 26px; height: 26px; left: -13px; top: -13px; background: linear-gradient(45deg, transparent 45%, #ff6a4a 45%, #ff6a4a 55%, transparent 55%), linear-gradient(-45deg, transparent 45%, #ff6a4a 45%, #ff6a4a 55%, transparent 55%); }
+
+/* combat: the creature struck, the warden, the weapon in hand, the shield */
+.target { position: absolute; left: 50%; top: 52px; transform: translateX(-50%); text-align: center; min-width: 200px; }
+.tg-name { font-size: 12px; opacity: 0.9; }
+.tg-bar { width: 200px; height: 4px; margin: 3px auto 0; background: rgba(0, 0, 0, 0.5); border-radius: 2px; overflow: hidden; }
+.tg-bar i { display: block; height: 100%; background: linear-gradient(90deg, #b8442c, #f08a5a); transition: width 0.15s; }
+.boss { position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%); width: min(560px, 52vw); text-align: center; }
+.bs-name { font: 18px var(--serif); letter-spacing: 0.08em; color: #bff6ee; }
+.bs-bar { height: 8px; margin-top: 5px; background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(127, 232, 255, 0.45); border-radius: 4px; overflow: hidden; }
+.bs-bar i { display: block; height: 100%; background: linear-gradient(90deg, #1d8f9a, #5ff2e0); transition: width 0.25s; }
+.boss.enraged .bs-bar i { background: linear-gradient(90deg, #9a2d1d, #ff8a5a); }
+.boss.enraged .bs-name { color: #ffc0a8; }
+.weapon { position: absolute; right: 22px; bottom: 94px; text-align: right; font-size: 12px; opacity: 0.4; transition: opacity 0.4s; }
+.weapon.on { opacity: 0.95; }
+.weapon .muted { color: #c9c0aa; font-size: 11px; }
+.weapon kbd { font-size: 10px; padding: 0 4px; }
+.heat { width: 130px; height: 4px; margin: 4px 0 0 auto; background: rgba(0, 0, 0, 0.45); border-radius: 2px; overflow: hidden; display: none; }
+.heat.show { display: block; }
+.heat i { display: block; height: 100%; background: linear-gradient(90deg, #5ff2e0, #ffd27a 70%, #ff5a3a); }
+.heat.over i { animation: pulse 0.5s infinite; }
+.shb { width: 180px; height: 3px; background: rgba(0, 0, 0, 0.45); border-radius: 2px; overflow: hidden; display: none; }
+.shb.show { display: block; }
+.shb i { display: block; height: 100%; background: linear-gradient(90deg, #3fb4ff, #bff6ff); }
+.shieldfx { position: absolute; inset: 0; opacity: 0; transition: opacity 0.3s; background: radial-gradient(ellipse at center, transparent 50%, rgba(70, 190, 255, 0.42) 100%); box-shadow: inset 0 0 0 2px rgba(150, 230, 255, 0.5), inset 0 0 40px rgba(120, 220, 255, 0.45); }
+.hud.aegis .shieldfx { opacity: 1; }
+.hud.phase .shieldfx { opacity: 1; background: radial-gradient(ellipse at center, transparent 35%, rgba(180, 140, 255, 0.35) 100%); }
+.hs.hand { border-style: dashed; }
 
 .prompt { position: absolute; left: 50%; top: calc(50% + 48px); transform: translateX(-50%); font-size: 15px; white-space: nowrap; }
 .prompt .muted { color: #c9c0aa; }
@@ -75,6 +108,7 @@
 .n-artifact { border-color: #c49aff; }
 .n-route { border-color: #d89a6a; }
 .n-layer { border-color: #e7e0c8; }
+.n-danger { border-color: #ff6a50; }
 @keyframes noteIn { from { opacity: 0; transform: translateX(24px); } }
 
 .banner { position: absolute; left: 0; right: 0; top: 24%; padding: 18px 0 22px; text-align: center; transition: opacity 1.5s; font-family: var(--serif); background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.2) 45%, transparent 70%); }

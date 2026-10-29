@@ -10,12 +10,14 @@ import { ArtifactSystem } from '../artifacts/artifacts.js';
 import { Discovery } from '../systems/discovery.js';
 import { MapData } from '../systems/mapdata.js';
 import { EnvironmentProbe } from '../systems/environment.js';
+import { Combat } from '../systems/combat.js';
 import { SaveStore, captureSave, applySave, exportSave, validateSave, isLegacySave, SAVE_VERSION } from '../systems/save.js';
 import { AudioEngine } from '../audio/audio.js';
 import { HUD } from './hud.js';
 import { TouchControls, detectTouch } from './touch.js';
 import { Journal } from './journal.js';
 import { LAYERS } from '../world/layers.js';
+import { ABILITIES, describeWeapon } from '../artifacts/artifactGen.js';
 import { FAMILY_LABEL } from '../creatures/genome.js';
 import { buildCreature } from '../creatures/body.js';
 import { typicalPhenotype } from '../creatures/anatomy.js';
@@ -67,14 +69,16 @@ const TIPS = [
 const TOUCH_CONTROLS = [
   ['Left thumb', 'Drag to move · push fully to run'], ['Right side', 'Drag to look around'], ['Jump', 'Jump · hold while pushing into a wall to climb'],
   ['Arm', 'Fire / release the grappling arm at the centre of the view'], ['Reel in · Pay out', 'Appear while the cable is attached'],
+  ['Attack (hold)', 'Strike, shoot or pour the ray of the weapon in hand'],
   ['Crouch', 'Crouch · drop from a wall'], ['Observe (hold)', 'Zoom in and study a creature'], ['Take', 'Appears next to an artifact'],
   ['Ability · Lamp', 'Artifact ability · explorer\'s lamp'], ['☰ · map · book', 'Pause · map · journal'],
 ];
 
 const CONTROLS = [
   ['W A S D', 'Move'], ['Mouse', 'Look'], ['Space', 'Jump · climb a wall when held against it · let go of the cable'], ['Shift', 'Run'], ['Ctrl / C', 'Crouch · drop from a wall'],
-  ['Left click', 'Fire / release the grappling arm'], ['Right click / Q / wheel up', 'Reel in the cable'], ['Z / wheel down', 'Pay out the cable'], ['X', 'Release the cable'],
-  ['E', 'Take an artifact'], ['F (hold)', 'Observe creatures (zoom)'], ['R', 'Use an artifact ability'], ['L', "Explorer's lamp"],
+  ['Left click (hold)', 'Attack with the weapon in hand'], ['T', 'Switch weapon'],
+  ['Right click / G', 'Fire / release the grappling arm'], ['Q / wheel up', 'Reel in the cable'], ['Z / wheel down', 'Pay out the cable'], ['X', 'Release the cable'],
+  ['E', 'Take an artifact'], ['F (hold)', 'Observe creatures (zoom)'], ['R', 'Use an artifact ability'], ['V', 'Choose the next ability'], ['L', "Explorer's lamp"],
   ['M', 'Map'], ['N', 'Vertical abyss map'], ['J / Tab', 'Creature catalog'], ['I', 'Equipment'], ['Esc / P', 'Pause'],
 ];
 
@@ -82,9 +86,9 @@ const CONTROLS = [
 const PAD_CONTROLS = [
   [`${GLYPH.lstick} stick`, 'Move · push up or down to climb'], [GLYPH.L3, 'Run (toggle; stopping ends it)'], [`${GLYPH.rstick} stick`, 'Look'],
   [GLYPH.cross, 'Jump · hold against a wall to climb · let go of the cable'], [GLYPH.circle, 'Crouch · drop from a wall'],
-  [GLYPH.square, 'Take an artifact'], [`${GLYPH.triangle} / ${GLYPH.R3} (hold)`, 'Observe creatures (zoom)'],
-  [GLYPH.R2, 'Fire / release the grappling arm'], [GLYPH.L2, 'Reel in the cable'], [GLYPH.L1, 'Pay out the cable'], [GLYPH.R1, 'Release the cable'],
-  [GLYPH.up, "Explorer's lamp"], [GLYPH.down, 'Use an artifact ability'], [`${GLYPH.left} ${GLYPH.right}`, 'Map · vertical abyss map'],
+  [GLYPH.square, 'Take an artifact'], [`${GLYPH.triangle} (hold)`, 'Observe creatures (zoom)'],
+  [`${GLYPH.R2} (hold)`, 'Attack with the weapon in hand'], [GLYPH.R1, 'Fire / release the grappling arm'], [GLYPH.L2, 'Reel in the cable'], [GLYPH.L1, 'Pay out the cable'],
+  [GLYPH.up, "Explorer's lamp"], [GLYPH.down, 'Use an artifact ability'], [GLYPH.R3, 'Choose the next ability'], [`${GLYPH.left} ${GLYPH.right}`, 'Map · vertical abyss map'],
   [GLYPH.share, 'Creature catalog'], [GLYPH.touchpad, 'Equipment'], [GLYPH.options, 'Pause'],
   ['Menus', `D-pad or left stick to choose · ${GLYPH.cross} select · ${GLYPH.circle} back · ${GLYPH.L1} ${GLYPH.R1} journal tabs · right stick scrolls (on the map it pans; ${GLYPH.L2} ${GLYPH.R2} zoom)`],
 ];
@@ -219,6 +223,7 @@ export class App {
     if (g && g.player) {
       g.touch = on;
       if (g.grapple) g.grapple.setTouchLayout(on);
+      if (g.combat) g.combat.setTouchLayout(on);
       if (on && !this.touchUI) this.touchUI = new TouchControls(g, this);
       if (this.touchUI) this.touchUI.setVisible(on && this.state === 'playing');
     }
@@ -594,6 +599,7 @@ export class App {
     // a body to compile the creature shader with before play begins
     try { const sp0 = plan.species[0]; g.warmupObjects = [buildCreature(typicalPhenotype(sp0), 1, { res: 12 }).mesh]; } catch (err) { console.warn(err); }
     g.artifacts = new ArtifactSystem(g);
+    g.combat = new Combat(g);
     g.discovery = new Discovery(g);
     g.mapData = new MapData(g);
     g.envProbe = new EnvironmentProbe(g);
@@ -607,7 +613,7 @@ export class App {
     g.camera.rotation.set(p.pitch, p.yaw, 0, 'YXZ');
     // per-frame glue that is not a system of its own
     const glue = { update: (dt) => this.glueUpdate(dt) };
-    g.systems.push(glue, p, g.grapple, g.ecosystem, g.artifacts, g.discovery, g.mapData, g.envProbe);
+    g.systems.push(glue, p, g.grapple, g.ecosystem, g.artifacts, g.combat, g.discovery, g.mapData, g.envProbe);
     // interface
     this.hud = new HUD(g, this.ui);
     this.hud.setVisible(false);
@@ -642,6 +648,23 @@ export class App {
     gr.on('release', () => A.play('grapple-release'));
     gr.on('stowed', () => A.play('grapple-stow'));
     gr.on('pullup', () => A.play('pullup'));
+    // combat
+    const C = g.combat;
+    C.on((type, d) => {
+      switch (type) {
+        case 'swing': A.play(d.heavy ? 'swing-heavy' : 'swing'); break;
+        case 'hit': A.play(d.boss ? 'hit-heavy' : 'hit', d.pos); R.rumble(60, 0.25, 0.35); break;
+        case 'kill': A.play('kill', d.pos); R.rumble(140, 0.4, 0.5); break;
+        case 'shot': A.play(d.kind === 'shard' ? 'shard' : 'bolt'); R.rumble(50, 0.1, 0.3); break;
+        case 'impact': A.play('impact', d.pos); break;
+        case 'overheat': A.play('overheat'); H.notify(`The <b>${esc(C.label)}</b> overheats — let it cool.`, 'info', 3); break;
+        case 'shield-hit': A.play('shield-hit'); break;
+        case 'shield-break': A.play('shield-break'); H.notify('The aegis shatters.', 'info', 2); break;
+        case 'orb-hit': case 'orb-burst': A.play('orb', d.pos); break;
+        case 'ability': A.play(`ab-${d.type}`); R.rumble(160, 0.5, 0.5); break;
+        default: break;
+      }
+    });
     // creature voices: nearby and urgent calls first, never a cacophony
     let lastCall = 0;
     g.ecosystem.on((type, d) => {
@@ -654,6 +677,24 @@ export class App {
       A.creatureCall(d.a.sp, d.a.pos, d.kind, d.a.juvenile ? 0.45 : 1);
     });
     const D = g.discovery;
+    // fights and the warden of the Throne Cup
+    let lastTurn = -99;
+    g.ecosystem.on((type, d) => {
+      switch (type) {
+        case 'creature-strike': A.play('bite', d.a.pos); break;
+        case 'retaliate':
+          if (g.gameTime - lastTurn > 8) { lastTurn = g.gameTime; H.notify(`${D.known(d.a.sp.id) ? `The <b>${esc(d.a.sp.name)}</b>` : 'The creature'} turns on you!`, 'danger', 3); }
+          break;
+        case 'boss-wake': H.banner('The Throne Cup', d.name, 'It has woken. You need not fight it: climb out of its lake to escape.', 7); A.play('boss-roar', d.a.pos); R.rumble(600, 0.8, 0.6); break;
+        case 'boss-enrage': H.notify(`<b>${esc(d.name)}</b> is enraged!`, 'danger', 4); A.play('boss-roar', d.a.pos); break;
+        case 'boss-slam': A.play('boss-slam', d.pos); R.rumble(300, 1, 0.7); break;
+        case 'boss-volley': A.play('boss-volley', d.pos); break;
+        case 'boss-charge-hit': R.rumble(250, 0.9, 0.6); break;
+        case 'boss-leave': H.notify('The warden lets you go and returns to its throne.', 'info', 5); break;
+        case 'boss-slain': H.banner('The Throne Cup', 'The Warden Falls', 'Something rises from the lake…', 7); A.play('boss-fall', d.a.pos); this.save(true); break;
+        default: break;
+      }
+    });
     D.on((type, d) => {
       switch (type) {
         case 'species': H.notify(`New species recorded: <b>${esc(d.name)}</b> <span class="muted">${FAMILY_LABEL[d.family]}</span>`, 'creature', 6); A.play('species'); break;
@@ -682,12 +723,15 @@ export class App {
     });
     g.artifacts.on((type, a) => {
       switch (type) {
-        case 'collect': H.notify(`Recovered <b>${esc(a.name)}</b> <span class="muted">${a.gradeLabel}</span>${g.artifacts.equipped.includes(a.id) ? ' — equipped' : ' — carried (press I)'}`, 'artifact', 7); A.play('pickup'); break;
+        case 'collect': H.notify(`Recovered <b>${esc(a.name)}</b> <span class="muted">${a.gradeLabel}</span>${g.artifacts.wielded === a.id ? ' — in hand' : g.artifacts.equipped.includes(a.id) ? ' — equipped' : ' — carried (press I)'}`, 'artifact', 7); A.play('pickup'); break;
+        case 'wield': H.notify(a ? `In hand: <b>${esc(a.name)}</b> <span class="muted">${esc(describeWeapon(a.weapon))}</span>` : "In hand: the <b>delver's pick</b>", 'artifact', 4); A.play('wield'); break;
+        case 'no-weapon': H.notify("You carry no other weapon than the delver's pick.", 'info', 3); break;
+        case 'select': H.notify(`Ability ready: <b>${esc(ABILITIES[a.ability.type].label)}</b> <span class="muted">${esc(a.name)}</span>`, 'artifact', 2.5); A.play('tick'); break;
         case 'identified': H.notify(`You now understand the <b>${esc(a.name)}</b>.`, 'artifact', 6); A.play('fact'); break;
         case 'cooldown': H.notify(`${esc(a.a.name)} is recharging (${Math.ceil(a.cd)} s)`, 'info', 2); break;
         case 'lamp': A.play('lamp'); break;
         case 'ability': {
-          A.play('ability', p.pos);
+          if (!ABILITIES[a.ability.type].kind) A.play('ability', p.pos);
           if (a.ability.type === 'pulse') { const n = D.pulse(80); H.notify(`Echo pulse: ${n} kinds of creature nearby.`, 'creature', 4); }
           if (a.ability.type === 'survey') { g.mapData.reveal(p.pos.x, p.pos.y, p.pos.z, 160); H.notify('Surveyed the surroundings — the map has grown.', 'route', 4); }
           if (a.ability.type === 'flare') H.notify('The flare floods the area with light.', 'info', 3);
@@ -704,19 +748,19 @@ export class App {
     const seq = this.device === 'pad' ? [
       [1, `Left stick moves (${G.L3} to run) · right stick looks · ${G.cross} jump`],
       [11, 'The Abyss Eye lies at the centre of the world. Head for the gates in the rim wall to start your descent.'],
-      [22, `${G.R2} fires the grappling arm · ${G.L2} reels in · ${G.L1} pays out · ${G.R1} lets go`],
+      [22, `${G.R1} fires and releases the grappling arm · ${G.L2} reels in · ${G.L1} pays out · ${G.R2} attacks`],
       [34, `Hold ${G.triangle} to observe creatures · ${G.square} takes artifacts · ${G.up} lamp`],
       [46, `${G.left} map · ${G.right} vertical abyss map · ${G.share} catalog · ${G.touchpad} equipment`],
     ] : this.touch ? [
       [1, 'Drag on the left to move (push fully to run) · drag on the right to look'],
       [11, 'The Abyss Eye lies at the centre of the world. Head for the gates in the rim wall to start your descent.'],
-      [22, '<b>Arm</b> fires the grappling claw where you aim · <b>Reel in</b> and <b>Pay out</b> appear once it bites'],
+      [22, '<b>Arm</b> fires the grappling claw where you aim · <b>Reel in</b> and <b>Pay out</b> appear once it bites · <b>Attack</b> strikes'],
       [34, 'Hold <b>Observe</b> to study creatures · <b>Take</b> appears beside artifacts · hold <b>Jump</b> against rock to climb'],
       [46, 'The buttons at the top open the map and the journal · ☰ pauses'],
     ] : [
       [1, '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump'],
       [11, 'The Abyss Eye lies at the centre of the world. Head for the gates in the rim wall to start your descent.'],
-      [22, '<kbd>Left click</kbd> fires the grappling arm · <kbd>Right click</kbd> reels in · <kbd>Z</kbd> pays out'],
+      [22, '<kbd>Right click</kbd> fires the grappling arm · <kbd>Q</kbd> reels in · <kbd>Z</kbd> pays out · <kbd>Left click</kbd> attacks'],
       [34, 'Hold <kbd>F</kbd> to observe creatures · <kbd>E</kbd> takes artifacts · <kbd>L</kbd> lamp'],
       [46, '<kbd>M</kbd> map · <kbd>N</kbd> vertical abyss map · <kbd>J</kbd> catalog · <kbd>I</kbd> equipment'],
     ];
@@ -804,6 +848,7 @@ export class App {
       pos: g.player.pos, layer: info.layer, zone: info.zone, enclosed: g.envEnclosed || 0, altitude: e.altitude,
       water: e.water, river: e.river, fall: e.fall, city: e.city, chasm: e.chasm, night: g.renderer.night > 0.5,
       reeling: g.grapple.attached && g.grapple.reeling, paying: g.grapple.attached && g.grapple.paying,
+      beam: g.combat && (g.combat.firing || g.combat.ray) ? 1 : 0, boss: g.ecosystem.warden && g.ecosystem.warden.engaged ? 1 : 0,
     }, g.camera);
     } catch (err) {
       if (!this.audioErr) { this.audioErr = true; console.warn('audio update failed', err); }

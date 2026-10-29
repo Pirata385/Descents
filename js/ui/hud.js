@@ -1,12 +1,15 @@
-// Heads-up display: crosshair with grapple range feedback, compass with
-// markers, depth/layer readout, health and stamina, notifications, layer
-// banners, interaction prompts, the observation panel and worn artifacts.
+// Heads-up display: crosshair with grapple range feedback and hit markers,
+// compass with markers, depth/layer readout, health, stamina and the aegis
+// shield, notifications, layer banners, interaction prompts, the observation
+// panel, worn artifacts, the weapon in hand (and its heat), the health of the
+// creature last struck and the warden's health bar.
 import { LAYERS } from '../world/layers.js';
 import { FAMILY_LABEL } from '../creatures/genome.js';
 import { ACTION_LABEL } from '../creatures/brain.js';
 import { FULL_OBSERVATION } from '../systems/discovery.js';
 import { clamp, wrapAngle } from '../core/mathutil.js';
 import { GLYPH } from '../core/gamepad.js';
+import { WEAPONS } from '../artifacts/artifactGen.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const CARD = [['N', 0], ['NE', Math.PI / 4], ['E', Math.PI / 2], ['SE', Math.PI * 0.75], ['S', Math.PI], ['SW', -Math.PI * 0.75], ['W', -Math.PI / 2], ['NW', -Math.PI / 4]];
@@ -18,15 +21,19 @@ export class HUD {
     this.el.className = 'hud';
     this.el.innerHTML = `
       <div class="compass"><div class="compass-strip"></div><div class="compass-mark"></div></div>
-      <div class="crosshair"><div class="ch-dot"></div><div class="ch-ring"></div><div class="ch-dist"></div></div>
+      <div class="crosshair"><div class="ch-dot"></div><div class="ch-ring"></div><div class="ch-hit"></div><div class="ch-dist"></div></div>
+      <div class="target hidden"><div class="tg-name"></div><div class="tg-bar"><i></i></div></div>
+      <div class="boss hidden"><div class="bs-name"></div><div class="bs-bar"><i></i></div></div>
+      <div class="shieldfx"></div>
       <div class="prompt"></div>
       <div class="observe hidden"><div class="ob-name"></div><div class="ob-sub"></div><div class="bar"><i></i></div><div class="ob-act"></div></div>
       <div class="status">
         <div class="depth"><div class="depth-m"></div><div class="depth-l"></div></div>
-        <div class="bars"><div class="hb"><i></i></div><div class="sb"><i></i></div></div>
+        <div class="bars"><div class="hb"><i></i></div><div class="shb"><i></i></div><div class="sb"><i></i></div></div>
       </div>
       <div class="clock"></div>
       <div class="slots-hud"></div>
+      <div class="weapon"><div class="wp-name"></div><div class="heat"><i></i></div></div>
       <div class="rope hidden"></div>
       <div class="notes"></div>
       <div class="banner hidden"><div class="b-small"></div><div class="b-big"></div><div class="b-sub"></div></div>
@@ -123,6 +130,7 @@ export class HUD {
     hb.classList.toggle('show', p.health < p.maxHealth - 0.5);
     sb.classList.toggle('show', p.stamina < p.maxStamina - 0.5 || p.mode === 'climb');
     hb.classList.toggle('low', p.health < 30);
+    this.updateCombat(dt, slow);
     // hurt vignette
     this.hurtA = Math.max(0, this.hurtA - dt * 0.8);
     const lowH = p.health < 30 ? 0.25 + Math.sin(g.gameTime * 4) * 0.08 : 0;
@@ -142,6 +150,50 @@ export class HUD {
       }
     }
     this.$('.fps').classList.toggle('hidden', !g.settings.showFps);
+  }
+
+  /** Hit markers, the shield, the weapon's heat, the struck creature's and the warden's health. */
+  updateCombat(dt, slow) {
+    const g = this.game, C = g.combat, p = g.player;
+    if (!C) return;
+    const ch = this.$('.crosshair');
+    ch.classList.toggle('hit', C.hitT > 0);
+    ch.classList.toggle('kill', C.killT > 0);
+    const shb = this.$('.shb');
+    shb.classList.toggle('show', C.shield > 0);
+    if (C.shield > 0) shb.firstChild.style.width = `${clamp(C.shield / Math.max(1, C.shieldMax), 0, 1) * 100}%`;
+    this.el.classList.toggle('aegis', C.shield > 0);
+    this.el.classList.toggle('phase', C.phaseT > 0);
+    const W = C.W;
+    const heat = this.$('.heat');
+    heat.classList.toggle('show', W.kind === 'beam' && C.heat > 0.5);
+    heat.classList.toggle('over', C.overheated);
+    heat.firstChild.style.width = `${clamp(C.heat, 0, 100)}%`;
+    if (!slow) return;
+    const many = g.artifacts && g.artifacts.weapons().length > 1;
+    const key = many ? (g.pad ? '' : g.touch ? '' : ' <kbd>T</kbd>') : '';
+    const kind = W.kind === 'beam' ? 'ray' : W.kind === 'shot' ? 'caster' : 'melee';
+    this.set('.wp-name', `${esc(C.label)} <span class="muted">${kind}${C.weapon.element ? ` · ${C.weapon.element}` : ''}</span>${key}`);
+    this.$('.weapon').classList.toggle('on', C.drawn);
+    // the creature last struck
+    const t = C.target;
+    const tg = this.$('.target');
+    const w = g.ecosystem && g.ecosystem.warden;
+    const boss = w && w.engaged && w.agent.pos.distanceTo(p.pos) < 130 ? w.agent : null;
+    if (t && C.targetT > 0 && t !== boss) {
+      tg.classList.remove('hidden');
+      const known = g.discovery && g.discovery.known(t.sp.id);
+      this.set('.tg-name', t.dead ? `${known ? esc(t.sp.name) : 'The creature'} is slain` : known ? esc(t.sp.name) : 'Unknown creature');
+      tg.querySelector('i').style.width = `${clamp(t.hp / Math.max(1, t.maxHp), 0, 1) * 100}%`;
+    } else tg.classList.add('hidden');
+    const bs = this.$('.boss');
+    bs.classList.toggle('hidden', !boss);
+    if (boss) {
+      this.set('.bs-name', esc(w.name));
+      bs.classList.toggle('enraged', !!w.enraged);
+      bs.querySelector('i').style.width = `${clamp(boss.hp / boss.maxHp, 0, 1) * 100}%`;
+    }
+    void dt; void WEAPONS;
   }
 
   updateCompass(p) {
@@ -209,8 +261,8 @@ export class HUD {
       const known = g.discovery.known(a.sp.id);
       txt = `${pad ? `Hold ${GLYPH.triangle} Observe` : t ? 'Hold <b>Observe</b> to study' : '<kbd>F</kbd> Observe'} ${known ? esc(a.sp.name) : 'the creature'}`;
     } else if (g.grapple && g.grapple.attached) {
-      txt = pad ? `${GLYPH.L2} reel in · ${GLYPH.L1} pay out · ${GLYPH.cross} let go`
-        : t ? 'Hold <b>Reel in</b> or <b>Pay out</b> · <b>Jump</b> to let go' : '<kbd>RMB</kbd>/<kbd>Q</kbd> reel in · <kbd>Z</kbd> pay out · <kbd>Space</kbd> let go';
+      txt = pad ? `${GLYPH.L2} reel in · ${GLYPH.L1} pay out · ${GLYPH.R1} release · ${GLYPH.cross} let go`
+        : t ? 'Hold <b>Reel in</b> or <b>Pay out</b> · <b>Jump</b> to let go' : '<kbd>Q</kbd>/wheel reel in · <kbd>Z</kbd> pay out · <kbd>RMB</kbd> release · <kbd>Space</kbd> let go';
     } else if (p.mode === 'climb') {
       txt = pad ? `Stick up or down to climb · ${GLYPH.cross} leap off · ${GLYPH.circle} drop`
         : t ? 'Push up or down to climb · <b>Leap</b> off · <b>Drop</b>' : '<kbd>W</kbd>/<kbd>S</kbd> climb · <kbd>Space</kbd> leap off · <kbd>Ctrl</kbd> drop';
@@ -250,7 +302,14 @@ export class HUD {
       const isActive = active && active.id === id;
       return `<div class="hs ${isActive ? 'active' : ''}" title="${esc(a.name)}"><span class="grade g${a.grade}">${['IV', 'III', 'II', 'I', '✶'][a.grade]}</span>${isActive ? `${this.game.pad ? GLYPH.down : this.game.touch ? '' : '<kbd>R</kbd>'}${cd > 0 ? `<b>${Math.ceil(cd)}</b>` : ''}` : ''}</div>`;
     }).join('');
-    this.set('.slots-hud', html);
+    // the weapon in hand, when it carries an ability
+    const w = A.wieldedArt();
+    const wHtml = w && w.ability && w.ability.type !== 'glide' ? (() => {
+      const cd = A.cooldowns.get(w.id) || 0, isActive = active && active.id === w.id;
+      return `<div class="hs hand ${isActive ? 'active' : ''}" title="${esc(w.name)}"><span class="grade g${w.grade}">⚔</span>${isActive ? `${this.game.pad ? GLYPH.down : this.game.touch ? '' : '<kbd>R</kbd>'}${cd > 0 ? `<b>${Math.ceil(cd)}</b>` : ''}` : ''}</div>`;
+    })() : '';
+    const html2 = html + wHtml;
+    this.set('.slots-hud', html2);
   }
 
   updateRope(gr) {

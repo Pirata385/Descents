@@ -262,6 +262,8 @@ export function planLayer4(seed, exit, names) {
       const D = host.Rc + Rc + gap;
       const g = make(host.x + Math.cos(a) * D, host.z + Math.sin(a) * D, host.yRim - drop, Rc, lr, { throne: true });
       g.rimW = 6;
+      // the warden's lake is shallow: the explorer wades in it rather than swims
+      g.bed = g.yRim - 1.45;
       if (!fits(g)) continue;
       const A = rimPoint(host, g.x, g.z), B = rimPoint(g, host.x, host.z);
       G.push(g);

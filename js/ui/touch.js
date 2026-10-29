@@ -16,6 +16,7 @@ const ICON = {
   take: '<path d="M7 11V6a1.5 1.5 0 013 0v5M10 10V4.5a1.5 1.5 0 013 0V10M13 10V5.5a1.5 1.5 0 013 0V11M16 11V8a1.5 1.5 0 013 0v6a7 7 0 01-7 7h-1a6 6 0 01-5-3l-2.5-4.5a1.5 1.5 0 012.6-1.5L7 14"/>',
   reelIn: '<path d="M12 21V8M7 12l5-5 5 5M5 3h14"/>',
   reelOut: '<path d="M12 3v13M7 12l5 5 5-5M5 21h14"/>',
+  attack: '<path d="M14.5 3.5L20.5 3.5 20.5 9.5 9 21 3 15zM6 12l6 6M3 21l3-3"/>',
   ability: '<path d="M12 2l2.6 6.6L21 9l-5 4.4L17.5 21 12 17.3 6.5 21 8 13.4 3 9l6.4-.4z"/>',
   lamp: '<path d="M9 21h6M10 17h4M12 3a6 6 0 00-3.5 10.9V17h7v-3.1A6 6 0 0012 3z"/>',
   pause: '<path d="M4 6h16M4 12h16M4 18h16"/>',
@@ -55,6 +56,7 @@ export class TouchControls {
       <div class="t-actions">
         <button class="t-btn t-jump" data-act="jump" aria-label="Jump">${svg('jump')}<span>Jump</span></button>
         <button class="t-btn t-grapple" data-tap="grapple" aria-label="Grappling arm">${svg('grapple')}<span>Arm</span></button>
+        <button class="t-btn t-attack ctx" data-act="attack" aria-label="Attack">${svg('attack')}<span>Attack</span></button>
         <button class="t-btn t-crouch" data-act="crouch" aria-label="Crouch">${svg('crouch')}<span>Crouch</span></button>
         <button class="t-btn t-observe" data-act="observe" aria-label="Observe">${svg('observe')}<span>Observe</span></button>
         <button class="t-btn t-lamp" data-tap="lamp" aria-label="Lamp">${svg('lamp')}<span>Lamp</span></button>
@@ -174,9 +176,10 @@ export class TouchControls {
         b.classList.add('down');
         const act = b.dataset.act, tap = b.dataset.tap;
         if (act) { inp.press(act); this.held.set(e.pointerId, act); }
-        if (tap === 'grapple') inp.clicked |= 1;
+        if (tap === 'grapple') inp.clicked |= 4;
+        if (act === 'attack') inp.clicked |= 1;
         else if (tap) { inp.press(tap); this.held.set(e.pointerId, tap); }
-        if (navigator.vibrate && (act === 'jump' || tap === 'grapple')) navigator.vibrate(8);
+        if (navigator.vibrate && (act === 'jump' || act === 'attack' || tap === 'grapple')) navigator.vibrate(8);
       });
       const up = (e) => {
         b.classList.remove('down');
@@ -210,6 +213,7 @@ export class TouchControls {
     show('.t-reelout', attached);
     const abil = A ? A.abilityItems() : [];
     show('.t-ability', abil.length > 0 && !attached);
+    show('.t-attack', !attached && p.mode !== 'dead');
     if (abil.length) {
       const a = abil[A.activeIndex % abil.length];
       const cd = A.cooldowns.get(a.id) || 0;

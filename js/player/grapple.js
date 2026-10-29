@@ -140,14 +140,15 @@ export class Grapple {
     this.cooldown = Math.max(0, this.cooldown - dt);
     if (p.mode === 'dead') { if (this.state !== 'idle') this.release(true); }
     // controls
-    const fireClick = inp.clicked & 1;
+    // the right mouse button, R1, G or the Arm button fire the claw and let it go
+    const fireClick = (inp.clicked & 4) || inp.was('grapple');
     if (fireClick && !this.game.uiBlocking) {
       if (this.state === 'idle') this.fire();
       else if (this.state === 'attached' || this.state === 'flying') this.release();
     }
     if (inp.was('release')) this.release();
     if (this.state === 'attached') {
-      this.reeling = !!(inp.buttons & 4) || inp.is('reelIn') || inp.wheel < 0;
+      this.reeling = inp.is('reelIn') || inp.wheel < 0;
       this.paying = inp.is('reelOut') || inp.wheel > 0;
       if (inp.wheel > 0) this.ropeLen = Math.min(this.range, this.ropeLen + 1.5);
       if (inp.wheel < 0) this.ropeLen = Math.max(1, this.ropeLen - 1.5);

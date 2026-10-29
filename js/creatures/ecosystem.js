@@ -23,6 +23,7 @@ import { Animator } from './motion.js';
 import { decide, ACTION_LABEL } from './brain.js';
 import { Habitats, BAND } from './habitat.js';
 import { Z_CITY } from '../world/field.js';
+import { Warden } from './warden.js';
 
 const RS = 64;              // region size (m)
 const ACTIVE_R = 120;       // radius of the creatures' area (it follows the render distance, see areaRadius)
@@ -60,6 +61,7 @@ export class Ecosystem {
     this.hour = 9;
     this.dark = false;
     this.lampOn = false;
+    this.warden = new Warden(this);
   }
 
   on(fn) { this.listeners.push(fn); }
@@ -243,10 +245,12 @@ export class Ecosystem {
    */
   build(a) {
     if (a.built || a.building || a.dead) return;
-    if (this.syncBuild || typeof Worker === 'undefined') { this.attach(a, buildCreature(a.ph, a.id, { res: this.meshRes() })); return; }
+    // the warden is large and seen up close: a finer skin
+    const res = this.meshRes() + (a.boss ? 12 : 0);
+    if (this.syncBuild || typeof Worker === 'undefined') { this.attach(a, buildCreature(a.ph, a.id, { res })); return; }
     a.building = true;
     this.pending = (this.pending || 0) + 1;
-    buildCreatureAsync(a.ph, a.id, { res: this.meshRes() }).then((cr) => {
+    buildCreatureAsync(a.ph, a.id, { res }).then((cr) => {
       this.pending--;
       a.building = false;
       if (a.dead || a.gone) { cr.mesh.geometry.dispose(); cr.mesh.skeleton.dispose(); return; }
@@ -262,6 +266,7 @@ export class Ecosystem {
     a.obj = { root, mesh: cr.mesh, creature: cr };
     a.anim = new Animator(cr, a.ph, a.sp, a.id);
     a.built = true;
+    if (a.boss) this.warden.adorn(a, cr);
     this.group.add(root);
   }
 
@@ -372,7 +377,7 @@ export class Ecosystem {
     const dropR = areaR + 35;
     // fold back the ones that left the area
     for (const a of this.agents) {
-      if (a.dead) continue;
+      if (a.dead || a.keep) continue;
       const d = a.pos.distanceTo(ppos);
       if (d > (a.mode === 'air' ? dropR + 40 : dropR) || Math.abs(a.pos.y - ppos.y) > 220) this.despawn(a);
     }
@@ -385,7 +390,7 @@ export class Ecosystem {
     for (const r of this.regions.values()) r.active = Math.hypot(r.x - ppos.x, r.z - ppos.z) < areaR + RS * 0.5 && Math.abs(r.y - ppos.y) < 240;
     let count = 0;
     const perSp = new Map();
-    for (const a of this.agents) if (!a.dead) { count++; perSp.set(a.S, (perSp.get(a.S) || 0) + 1); }
+    for (const a of this.agents) if (!a.dead && !a.boss) { count++; perSp.set(a.S, (perSp.get(a.S) || 0) + 1); }
     if (count >= this.maxAgents) return;
     const camFwd = _v3.set(0, 0, -1);
     if (this.game.camera) camFwd.applyQuaternion(this.game.camera.quaternion);
@@ -411,7 +416,7 @@ export class Ecosystem {
         const crowd = (perSp.get(S) || 0) / (S.s.behavior.groupSize[1] + 2);
         // the open tube is where the eye goes: its fliers and climbers are favoured
         // over the small cave fauna, which fills the caves when the explorer is in them
-        const open = S.s.layer === 'layer3' ? (S.s.behavior.habitat === 'cave' ? 0.55 : 1.8) : 1;
+        const open = S.s.layer === 'layer3' ? (S.s.behavior.habitat === 'cave' ? 0.55 : S.s.behavior.habitat === 'wall' ? 2.8 : 1.8) : 1;
         const w = S.cap * abundance * open / (1 + crowd * crowd * 2);
         if (w <= 0) continue;
         cand.push([S, w]); tot += w;
@@ -419,7 +424,12 @@ export class Ecosystem {
       if (!tot) continue;
       let pick = rng.next() * tot, S = cand[0][0];
       for (const [c, w] of cand) { pick -= w; if (pick <= 0) { S = c; break; } }
-      const center = this.hab.sample(S.s, S.rng, x, y, z, 24);
+      // species of narrow habitats (walls, rims, shores) rarely find theirs at a
+      // random spot: they get a second look anywhere around the explorer
+      let center = this.hab.sample(S.s, S.rng, x, y, z, 24);
+      // (in the open void of the Great Fault and among the goblets, where most spots are air)
+      const hb = S.s.behavior.habitat;
+      if (!center && hb !== 'air' && hb !== 'cave' && (band === BAND.CHASM || band === BAND.GOBLETS)) center = this.hab.sample(S.s, S.rng, ppos.x, ppos.y + dy * 0.5, ppos.z, Math.min(80, areaR));
       if (!center) continue;
       // out of sight: never right beside the explorer, nor close in front of it
       const dx = center.x - ppos.x, dz = center.z - ppos.z, d = Math.hypot(dx, dz);
@@ -463,7 +473,7 @@ export class Ecosystem {
     this.tickTimer -= dt;
     if (this.tickTimer <= 0) { this.tickTimer = 5; this.abstractTick(5); }
     this.activationTimer -= dt;
-    if (this.activationTimer <= 0) { this.activationTimer = 0.5; this.updateActivation(player.pos); }
+    if (this.activationTimer <= 0) { this.activationTimer = 0.5; this.updateActivation(player.pos); this.warden.update(); }
     // start building bodies: a few at a time in the worker, nearest first
     if (this.buildQueue.length) {
       const bt = performance.now();
@@ -510,7 +520,8 @@ export class Ecosystem {
       // animate near creatures every frame, far ones less often
       const anim = d2 < 40 * 40 ? 1 : d2 < 90 * 90 ? 2 : 4;
       a.animDt = (a.animDt || 0) + dt;
-      if ((this.frame + a.id) % anim === 0) { this.animate(a, a.animDt); a.animDt = 0; }
+      // frozen in stasis: the pose holds
+      if ((this.frame + a.id) % anim === 0) { if (!(a.frozenT > 0)) this.animate(a, a.animDt); a.animDt = 0; }
     }
     for (const c of this.carcasses) c.time -= dt;
     this.carcasses = this.carcasses.filter((c) => c.time > 0 && c.meat > 0);
@@ -540,6 +551,8 @@ export class Ecosystem {
     if (a.poisonT > 0) { a.poisonT -= dt; if (this.damage(a, 2.5 * dt, { from: a.lastFrom, dot: true })) return; }
     if (a.hurtT > 0) a.hurtT -= dt;
     if (a.slowT > 0) a.slowT -= dt;
+    if (a.boss) { this.warden.live(a, dt); a.band = this.hab.bandAt(a.pos.x, a.pos.y + 0.5, a.pos.z); return; }
+    if (a.frozenT > 0) a.frozenT -= dt;
     if (a.stunT > 0) { a.stunT -= dt; a.speed = 0; a.action = 'idle'; if (a.mode === 'air') { a.vel.y -= 6 * dt; a.pos.addScaledVector(a.vel, dt); const f = this.hab.floorNear(a.pos.x, a.pos.y, a.pos.z, 4, 1); if (f && a.pos.y < f.y + 0.3) { a.pos.y = f.y; a.mode = a.ph.stats.fly > 0 && a.sp.behavior.habitat === 'air' ? 'air' : 'ground'; a.vel.set(0, 0, 0); } } return; }
     if (a.knockT > 0) {
       a.knockT -= dt;
@@ -557,8 +570,7 @@ export class Ecosystem {
       a.thinkT = 0.45 + Math.random() * 0.5;
       const prev = a.state;
       // a creature that turned on the explorer keeps at it for a while
-      if (a.boss) this.bossThink(a, dt);
-      else if (!(a.state === 'retaliate' && a.timer > 0 && this.player && this.player.mode !== 'dead')) decide(a, this);
+      if (!(a.state === 'retaliate' && a.timer > 0 && this.player && this.player.mode !== 'dead')) decide(a, this);
       this.onActionStart(a, prev);
     }
     this.act(a, dt);

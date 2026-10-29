@@ -17,6 +17,7 @@ export const ACTION_LABEL = {
   court: 'courting', nest: 'tending its nest', follow: 'following its parent', flock: 'with its group', mob: 'mobbing a predator',
   defend: 'driving off a rival', guard: 'defending its nest!', investigate: 'watching you', symbiosis: 'beside its host', stalk: 'stalking you', charge: 'charging!',
   wander: 'wandering', idle: 'resting', eat: 'eating', display: 'displaying', glide: 'gliding',
+  retaliate: 'fighting back!', warden: 'guarding its throne!',
 };
 
 /** Hours when a species sleeps, by activity pattern. */

@@ -22,7 +22,7 @@ const res = await page.evaluate(() => {
   g.renderer.render = () => {};
   const out = [];
   const step = (n, keys = []) => { for (let i = 0; i < n; i++) { for (const k of keys) { if (!g.input.down.has(k)) g.input.pressed.add(k); g.input.down.add(k); } g.update(1 / 30); g.input.endFrame(); for (const k of keys) g.input.down.delete(k); } };
-  const fire = () => { g.input.clicked |= 1; g.update(1 / 30); g.input.endFrame(); };
+  const fire = () => { g.input.clicked |= 4; g.update(1 / 30); g.input.endFrame(); };
   // try several angles until a clean cliff is found
   for (let k = 0; k < 24; k++) {
     const th = -Math.PI + (k / 24) * Math.PI * 2 + 0.07;

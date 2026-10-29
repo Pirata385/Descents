@@ -22,6 +22,11 @@ export const DEFAULT_BINDINGS = {
   reelIn: ['KeyQ'],
   reelOut: ['KeyZ'],
   release: ['KeyX'],
+  grapple: ['KeyG'],
+  weapon: ['KeyT'],
+  nextAbility: ['KeyV'],
+  // the left mouse button (and R2, and the touch Attack button) attacks
+  attack: [],
 };
 
 export class Input {
@@ -94,8 +99,8 @@ export class Input {
 
   unlock() { if (document.pointerLockElement) document.exitPointerLock(); }
 
-  is(action) { return this.virtualDown.has(action) || this.padDown.has(action) || this.bindings[action].some((c) => this.down.has(c)); }
-  was(action) { return this.virtualPressed.has(action) || this.padPressed.has(action) || this.bindings[action].some((c) => this.pressed.has(c)); }
+  is(action) { return this.virtualDown.has(action) || this.padDown.has(action) || (this.bindings[action] || []).some((c) => this.down.has(c)); }
+  was(action) { return this.virtualPressed.has(action) || this.padPressed.has(action) || (this.bindings[action] || []).some((c) => this.pressed.has(c)); }
 
   /** Virtual (on-screen) action buttons. */
   press(action) { if (!this.virtualDown.has(action)) this.virtualPressed.add(action); this.virtualDown.add(action); }
