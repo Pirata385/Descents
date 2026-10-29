@@ -5,6 +5,7 @@ Newest first.
 
 | # | Version | Date | File | Summary |
 | --- | --- | --- | --- | --- |
+| 6 | 0.5.1 | 2026-10-29 | [changelogs/v0.5.1.txt](changelogs/v0.5.1.txt) | A new sound engine from scratch (baked samples, voice pool); memory no longer grows while exploring; far fewer triangles and less work per frame on the lowest settings |
 | 5 | 0.5.0 | 2026-10-29 | [changelogs/v0.5.0.txt](changelogs/v0.5.0.txt) | Layer 4, the Goblets of Giants, with waterfall chains and an optional mini boss; Spore-like metaball creatures with personality; weapons, offensive and defensive abilities and new artifacts; sound that no longer goes silent; smoother on slow devices; Layer 3 windows and entrances |
 | 4 | 0.4.0 | 2026-10-14 | [changelogs/v0.4.0.txt](changelogs/v0.4.0.txt) | Audible sound, render distance in chunks with edge fog, uncapped frame rate with optional limit, continuous creature spawning, Layer 3 as a bright pale tube with marked entrances |
 | 3 | 0.3.0 | 2026-10-13 | [changelogs/v0.3.0.txt](changelogs/v0.3.0.txt) | Layer 3 explorable through a cave network to the Layer 4 entrance; rebuilt creatures; PS4 controller; deep lighting and sound; graphics presets |

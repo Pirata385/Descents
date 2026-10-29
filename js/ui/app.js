@@ -2,7 +2,7 @@
 // controls, save/load, and the wiring that attaches every gameplay system
 // (explorer, grappling arm, ecosystem, artifacts, discovery, maps, HUD,
 // journal, audio) to a running game.
-import { Game } from '../game.js';
+import { Game, chunkDetail } from '../game.js';
 import { Player } from '../player/player.js';
 import { Grapple } from '../player/grapple.js';
 import { Ecosystem } from '../creatures/ecosystem.js';
@@ -12,7 +12,7 @@ import { MapData } from '../systems/mapdata.js';
 import { EnvironmentProbe } from '../systems/environment.js';
 import { Combat } from '../systems/combat.js';
 import { SaveStore, captureSave, applySave, exportSave, validateSave, isLegacySave, SAVE_VERSION } from '../systems/save.js';
-import { AudioEngine } from '../audio/audio.js';
+import { Sound } from '../sound/sound.js';
 import { HUD } from './hud.js';
 import { TouchControls, detectTouch } from './touch.js';
 import { Journal } from './journal.js';
@@ -26,10 +26,11 @@ import { GamepadInput, GLYPH } from '../core/gamepad.js';
 const SETTINGS_KEY = 'descents.settings.v1';
 // graphics presets; changing any of these values by hand makes the preset 'custom'
 const QUALITY = {
-  low: { renderChunks: 6, viewDistance: 0.55, pixelRatio: 0.75, shadows: false, shadowSize: 1024, particles: 0.35, creatures: 32 },
-  medium: { renderChunks: 9, viewDistance: 0.8, pixelRatio: 1, shadows: true, shadowSize: 1024, particles: 0.6, creatures: 48 },
-  high: { renderChunks: 12, viewDistance: 1.0, pixelRatio: 1.5, shadows: true, shadowSize: 2048, particles: 1, creatures: 60 },
-  ultra: { renderChunks: 20, viewDistance: 1.4, pixelRatio: 2, shadows: true, shadowSize: 4096, particles: 1, creatures: 84 },
+  // low: coarse far terrain, thin vegetation, few creatures, no shadows or antialiasing
+  low: { renderChunks: 5, viewDistance: 0.35, pixelRatio: 0.6, shadows: false, shadowSize: 1024, particles: 0.3, creatures: 20, antialias: false },
+  medium: { renderChunks: 8, viewDistance: 0.75, pixelRatio: 1, shadows: false, shadowSize: 1024, particles: 0.6, creatures: 36, antialias: true },
+  high: { renderChunks: 12, viewDistance: 1.0, pixelRatio: 1.5, shadows: true, shadowSize: 2048, particles: 1, creatures: 56, antialias: true },
+  ultra: { renderChunks: 20, viewDistance: 1.4, pixelRatio: 2, shadows: true, shadowSize: 4096, particles: 1, creatures: 84, antialias: true },
 };
 const QUALITY_KEYS = ['renderChunks', 'viewDistance', 'pixelRatio', 'shadows', 'particles', 'creatures'];
 function presetOf(s) {
@@ -133,11 +134,19 @@ export class App {
       if (raw.renderChunks === undefined && QUALITY[raw.quality]) this.settings.renderChunks = QUALITY[raw.quality].renderChunks;
       // 0.4.0 started phones at the display refresh rate: from 0.5.0 nothing is capped unless the player asks
       if (!raw.uncapped5) { if (raw.fpsLimit === -1) this.settings.fpsLimit = 0; this.settings.uncapped5 = true; saveSettings(this.settings); }
+      // 0.5.1 made every preset lighter: a saved preset (or the old low values) takes the new values
+      if (!raw.presets51) {
+        const oldLow = raw.renderChunks === 6 && raw.viewDistance === 0.55 && raw.creatures === 32;
+        const q = oldLow ? 'low' : raw.quality;
+        if (QUALITY[q]) Object.assign(this.settings, QUALITY[q]);
+        this.settings.presets51 = true;
+        saveSettings(this.settings);
+      }
     } catch { /* no saved settings */ }
     this.settings.quality = presetOf(this.settings);
     this.dynScale = 1;
     document.body.classList.toggle('touch', this.touch);
-    this.audio = new AudioEngine(this.settings);
+    this.audio = new Sound(this.settings);
     this.state = 'title';
     this.game = null;
     this.screen = document.createElement('div');
@@ -254,9 +263,9 @@ export class App {
       </div>`;
     const seedEl = this.screen.querySelector('#seed');
     this.screen.querySelector('[data-act=dice]').onclick = () => { seedEl.value = randomSeedLabel(); };
-    this.screen.querySelector('[data-act=new]').onclick = () => { const s = seedEl.value.trim() || randomSeedLabel(); this.enterFullscreen(); this.audio.init(); this.startGame({ seedLabel: s }); };
+    this.screen.querySelector('[data-act=new]').onclick = () => { const s = seedEl.value.trim() || randomSeedLabel(); this.enterFullscreen(); this.audio.start(); this.startGame({ seedLabel: s }); };
     const cont = this.screen.querySelector('[data-act=continue]');
-    if (cont) cont.onclick = async () => { this.enterFullscreen(); this.audio.init(); const save = await SaveStore.load(latest.id); if (save) this.startGame({ save }); else this.toast('That save could not be read.'); };
+    if (cont) cont.onclick = async () => { this.enterFullscreen(); this.audio.start(); const save = await SaveStore.load(latest.id); if (save) this.startGame({ save }); else this.toast('That save could not be read.'); };
     this.screen.querySelector('[data-act=load]').onclick = () => this.showLoad('title');
     this.screen.querySelector('[data-act=settings]').onclick = () => this.showSettings('title');
     this.screen.querySelector('[data-act=controls]').onclick = () => this.showControls('title');
@@ -284,7 +293,7 @@ export class App {
       b.onclick = async () => {
         const save = await SaveStore.load(b.dataset.load);
         if (!save) { this.toast('That save could not be read.'); return; }
-        this.audio.init();
+        this.audio.start();
         if (this.game) { sessionStorage.setItem('descents.pendingLoad', b.dataset.load); location.reload(); return; }
         this.startGame({ save });
       };
@@ -319,10 +328,10 @@ export class App {
         <h3>Graphics</h3>
         <div class="set-row"><label>Quality</label><select data-key="quality">${[['low', 'Low (phones, older laptops)'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra'], ['custom', 'Custom']].map(([v, l]) => `<option value="${v}" ${s.quality === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span class="val"></span></div>
         ${slider('renderChunks', 'Render distance (chunks of 32 m)', 3, 32, 1, (v) => `${v}`)}
-        ${slider('viewDistance', 'Terrain detail', 0.5, 1.6, 0.05, (v) => `${Math.round(v * 100)}%`)}
+        ${slider('viewDistance', 'Terrain detail', 0.25, 1.6, 0.05, (v) => `${Math.round(v * 100)}%`)}
         ${slider('pixelRatio', 'Resolution scale', 0.5, 2, 0.25, (v) => `${v}×`)}
         ${slider('particles', 'Particles', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`)}
-        ${slider('creatures', 'Creatures nearby', 16, 96, 4, (v) => `${v}`)}
+        ${slider('creatures', 'Creatures nearby', 8, 96, 4, (v) => `${v}`)}
         ${check('shadows', 'Shadows')}
         ${check('autoQuality', 'Adapt resolution and terrain detail to keep the frame rate smooth')}
         <div class="set-row"><label>Frame rate limit</label><select data-key="fpsLimit">${[[0, 'Unlimited'], [-1, 'Display refresh rate (V-Sync)'], [30, '30 FPS'], [45, '45 FPS'], [60, '60 FPS'], [90, '90 FPS'], [120, '120 FPS'], [144, '144 FPS'], [165, '165 FPS'], [240, '240 FPS']].map(([v, l]) => `<option value="${v}" ${Number(s.fpsLimit ?? 0) === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span class="val"></span></div>
@@ -346,6 +355,7 @@ export class App {
         ${slider('volMusic', 'Music', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`)}
         ${slider('volAmbience', 'Ambience', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`)}
         ${slider('volEffects', 'Effects', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`)}
+        <div class="set-row"><label>Sound check</label><button class="btn small" data-act="soundtest">Play a test sound</button><span class="val sound-status">${esc(this.audio.status)}</span></div>
         <div class="row"><button class="btn" data-act="defaults">Defaults</button><button class="btn primary" data-act="back">Done</button></div>
       </div>`;
     const fmts = {};
@@ -381,6 +391,11 @@ export class App {
         this.applySettings(key);
       };
     });
+    this.screen.querySelector('[data-act=soundtest]').onclick = () => {
+      const st = this.screen.querySelector('.sound-status');
+      st.textContent = this.audio.test();
+      setTimeout(() => { if (st.isConnected) st.textContent = this.audio.status; }, 1500);
+    };
     this.screen.querySelector('[data-act=defaults]').onclick = () => { Object.assign(s, DEFAULT_SETTINGS); for (const k of Object.keys(s)) this.applySettings(k); this.showSettings(back); };
     this.screen.querySelector('[data-act=back]').onclick = () => { saveSettings(s); back === 'pause' ? this.showPause() : this.showTitle(); };
   }
@@ -388,11 +403,12 @@ export class App {
   applySettings(key) {
     saveSettings(this.settings);
     const g = this.game;
-    if (key.startsWith('vol')) this.audio.applyVolumes();
+    if (key.startsWith('vol')) this.audio.setVolumes();
     if (key === 'touchControls') this.setTouchMode(detectTouch(this.settings));
     if ((key === 'touchSize' || key === 'touchOpacity') && this.touchUI) this.touchUI.applySize();
     if (!g || !g.renderer) return;
     if (key === 'viewDistance') g.chunks.setQuality(this.settings.viewDistance);
+    if (key === 'viewDistance' || key === 'particles') { const d = chunkDetail(this.settings); g.chunks.setLowDetail(d.lowDetail, d.foliage); }
     if (key === 'renderChunks') { g.chunks.setRenderDistance(this.settings.renderChunks); g.renderer.setRenderDistance(this.settings.renderChunks); g.chunks.update(g.focusPoint()); }
     if (key === 'shadows') g.renderer.setShadows(this.settings.shadows);
     if (key === 'shadowSize') g.renderer.setShadowSize(this.settings.shadowSize);
@@ -492,7 +508,7 @@ export class App {
     g.paused = st === 'paused' || st === 'journal' || st === 'resume';
     if (this.hud) this.hud.setVisible(st === 'playing' || st === 'resume');
     if (this.touchUI) this.touchUI.setVisible(this.touch && playing && this.device !== 'pad');
-    if (this.audio.ready) this.audio.suspend(st === 'paused');
+    this.audio.pause(st === 'paused');
   }
 
   resume() {
@@ -501,7 +517,7 @@ export class App {
     this.setState('playing');
     if (this.touch) this.enterFullscreen();
     else this.game.input.lock();
-    this.audio.init();
+    this.audio.start();
   }
 
   openJournal(tab) {
@@ -510,7 +526,7 @@ export class App {
     this.hideScreen();
     this.setState('journal');
     this.journal.show(tab);
-    this.audio.play('open');
+    this.audio.fx('open');
   }
 
   closeJournal(relock) {
@@ -596,6 +612,8 @@ export class App {
     g.grapple = new Grapple(g, p);
     p.grapple = g.grapple;
     g.ecosystem = new Ecosystem(g);
+    // every species' call is baked in the background, so it is ready the first time it is heard
+    this.audio.prepareCalls(plan.species);
     // a body to compile the creature shader with before play begins
     try { const sp0 = plan.species[0]; g.warmupObjects = [buildCreature(typicalPhenotype(sp0), 1, { res: 12 }).mesh]; } catch (err) { console.warn(err); }
     g.artifacts = new ArtifactSystem(g);
@@ -632,36 +650,36 @@ export class App {
 
   wireEvents(g) {
     const A = this.audio, H = this.hud, p = g.player, gr = g.grapple;
-    p.on('step', (kind, speed, wet) => A.footstep(kind, speed, wet));
+    p.on('step', (kind, speed, wet) => A.step(kind, speed, wet));
     const R = this.pad;
     p.on('land', (impact, kind) => { A.land(impact, kind); if (impact > 6) R.rumble(120, Math.min(1, impact / 18), 0.3); });
-    p.on('jump', () => A.play('jump'));
-    p.on('hurt', (amt) => { A.play('hurt'); H.flashHurt(amt); R.rumble(220, 0.4 + Math.min(0.6, amt / 40), 0.6); });
-    p.on('death', () => { A.play('death'); R.rumble(700, 1, 0.8); });
-    p.on('respawn', () => A.play('respawn'));
-    p.on('splash', () => A.play('splash'));
-    p.on('mantle', () => A.play('mantle'));
-    p.on('grab', () => A.play('grab'));
-    gr.on('fire', () => { A.play('grapple-fire'); R.rumble(60, 0, 0.45); });
-    gr.on('attach', () => { A.play('grapple-attach', gr.anchor); R.rumble(90, 0.15, 0.7); });
-    gr.on('miss', () => A.play('grapple-miss'));
-    gr.on('release', () => A.play('grapple-release'));
-    gr.on('stowed', () => A.play('grapple-stow'));
-    gr.on('pullup', () => A.play('pullup'));
+    p.on('jump', () => A.fx('jump'));
+    p.on('hurt', (amt) => { A.fx('hurt'); H.flashHurt(amt); R.rumble(220, 0.4 + Math.min(0.6, amt / 40), 0.6); });
+    p.on('death', () => { A.fx('death'); R.rumble(700, 1, 0.8); });
+    p.on('respawn', () => A.fx('respawn'));
+    p.on('splash', () => A.fx('splash'));
+    p.on('mantle', () => A.fx('mantle'));
+    p.on('grab', () => A.fx('grab'));
+    gr.on('fire', () => { A.fx('grapple-fire'); R.rumble(60, 0, 0.45); });
+    gr.on('attach', () => { A.fx('grapple-attach', gr.anchor); R.rumble(90, 0.15, 0.7); });
+    gr.on('miss', () => A.fx('grapple-miss'));
+    gr.on('release', () => A.fx('grapple-release'));
+    gr.on('stowed', () => A.fx('grapple-stow'));
+    gr.on('pullup', () => A.fx('pullup'));
     // combat
     const C = g.combat;
     C.on((type, d) => {
       switch (type) {
-        case 'swing': A.play(d.heavy ? 'swing-heavy' : 'swing'); break;
-        case 'hit': A.play(d.boss ? 'hit-heavy' : 'hit', d.pos); R.rumble(60, 0.25, 0.35); break;
-        case 'kill': A.play('kill', d.pos); R.rumble(140, 0.4, 0.5); break;
-        case 'shot': A.play(d.kind === 'shard' ? 'shard' : 'bolt'); R.rumble(50, 0.1, 0.3); break;
-        case 'impact': A.play('impact', d.pos); break;
-        case 'overheat': A.play('overheat'); H.notify(`The <b>${esc(C.label)}</b> overheats — let it cool.`, 'info', 3); break;
-        case 'shield-hit': A.play('shield-hit'); break;
-        case 'shield-break': A.play('shield-break'); H.notify('The aegis shatters.', 'info', 2); break;
-        case 'orb-hit': case 'orb-burst': A.play('orb', d.pos); break;
-        case 'ability': A.play(`ab-${d.type}`); R.rumble(160, 0.5, 0.5); break;
+        case 'swing': A.fx(d.heavy ? 'swing-heavy' : 'swing'); break;
+        case 'hit': A.fx(d.boss ? 'hit-heavy' : 'hit', d.pos); R.rumble(60, 0.25, 0.35); break;
+        case 'kill': A.fx('kill', d.pos); R.rumble(140, 0.4, 0.5); break;
+        case 'shot': A.fx(d.kind === 'shard' ? 'shard' : 'bolt'); R.rumble(50, 0.1, 0.3); break;
+        case 'impact': A.fx('impact', d.pos); break;
+        case 'overheat': A.fx('overheat'); H.notify(`The <b>${esc(C.label)}</b> overheats — let it cool.`, 'info', 3); break;
+        case 'shield-hit': A.fx('shield-hit'); break;
+        case 'shield-break': A.fx('shield-break'); H.notify('The aegis shatters.', 'info', 2); break;
+        case 'orb-hit': case 'orb-burst': A.fx('orb', d.pos); break;
+        case 'ability': A.fx(`ab-${d.type}`); R.rumble(160, 0.5, 0.5); break;
         default: break;
       }
     });
@@ -674,41 +692,41 @@ export class App {
       const now = g.gameTime;
       if (dist > (urgent ? 140 : 70) || now - lastCall < (urgent ? 0.15 : 0.6)) return;
       lastCall = now;
-      A.creatureCall(d.a.sp, d.a.pos, d.kind, d.a.juvenile ? 0.45 : 1);
+      A.call(d.a.sp, d.a.pos, d.kind, d.a.juvenile ? 0.45 : 1);
     });
     const D = g.discovery;
     // fights and the warden of the Throne Cup
     let lastTurn = -99;
     g.ecosystem.on((type, d) => {
       switch (type) {
-        case 'creature-strike': A.play('bite', d.a.pos); break;
+        case 'creature-strike': A.fx('bite', d.a.pos); break;
         case 'retaliate':
           if (g.gameTime - lastTurn > 8) { lastTurn = g.gameTime; H.notify(`${D.known(d.a.sp.id) ? `The <b>${esc(d.a.sp.name)}</b>` : 'The creature'} turns on you!`, 'danger', 3); }
           break;
-        case 'boss-wake': H.banner('The Throne Cup', d.name, 'It has woken. You need not fight it: climb out of its lake to escape.', 7); A.play('boss-roar', d.a.pos); R.rumble(600, 0.8, 0.6); break;
-        case 'boss-enrage': H.notify(`<b>${esc(d.name)}</b> is enraged!`, 'danger', 4); A.play('boss-roar', d.a.pos); break;
-        case 'boss-slam': A.play('boss-slam', d.pos); R.rumble(300, 1, 0.7); break;
-        case 'boss-volley': A.play('boss-volley', d.pos); break;
+        case 'boss-wake': H.banner('The Throne Cup', d.name, 'It has woken. You need not fight it: climb out of its lake to escape.', 7); A.fx('boss-roar', d.a.pos); R.rumble(600, 0.8, 0.6); break;
+        case 'boss-enrage': H.notify(`<b>${esc(d.name)}</b> is enraged!`, 'danger', 4); A.fx('boss-roar', d.a.pos); break;
+        case 'boss-slam': A.fx('boss-slam', d.pos); R.rumble(300, 1, 0.7); break;
+        case 'boss-volley': A.fx('boss-volley', d.pos); break;
         case 'boss-charge-hit': R.rumble(250, 0.9, 0.6); break;
         case 'boss-leave': H.notify('The warden lets you go and returns to its throne.', 'info', 5); break;
-        case 'boss-slain': H.banner('The Throne Cup', 'The Warden Falls', 'Something rises from the lake…', 7); A.play('boss-fall', d.a.pos); this.save(true); break;
+        case 'boss-slain': H.banner('The Throne Cup', 'The Warden Falls', 'Something rises from the lake…', 7); A.fx('boss-fall', d.a.pos); this.save(true); break;
         default: break;
       }
     });
     D.on((type, d) => {
       switch (type) {
-        case 'species': H.notify(`New species recorded: <b>${esc(d.name)}</b> <span class="muted">${FAMILY_LABEL[d.family]}</span>`, 'creature', 6); A.play('species'); break;
-        case 'observed': H.notify(`Observations of the <b>${esc(d.name)}</b> are complete.`, 'creature'); A.play('fact'); break;
-        case 'fact': if (p.zoomed) A.play('fact'); break;
-        case 'interaction': H.notify(`Observed — ${esc(d.text)}`, 'interaction', 6); A.play('fact'); break;
-        case 'landmark': H.notify(`Discovered <b>${esc(d.name)}</b>`, 'landmark', 6); A.play('discover'); break;
+        case 'species': H.notify(`New species recorded: <b>${esc(d.name)}</b> <span class="muted">${FAMILY_LABEL[d.family]}</span>`, 'creature', 6); A.fx('species'); break;
+        case 'observed': H.notify(`Observations of the <b>${esc(d.name)}</b> are complete.`, 'creature'); A.fx('fact'); break;
+        case 'fact': if (p.zoomed) A.fx('fact'); break;
+        case 'interaction': H.notify(`Observed — ${esc(d.text)}`, 'interaction', 6); A.fx('fact'); break;
+        case 'landmark': H.notify(`Discovered <b>${esc(d.name)}</b>`, 'landmark', 6); A.fx('discover'); break;
         case 'route': H.notify(`Route found: <b>${esc(d.name)}</b>`, 'route', 5); break;
         case 'spotted': H.notify('Something glints nearby…', 'artifact', 4); break;
         case 'layer': {
           if (d.index > 0) {
             const L = d.layer;
             H.banner(L.name, L.title, `Depth ${Math.round(Math.max(0, -p.pos.y))} m`, 6);
-            A.play('layer');
+            A.fx('layer');
             this.save(true);
           }
           break;
@@ -723,15 +741,15 @@ export class App {
     });
     g.artifacts.on((type, a) => {
       switch (type) {
-        case 'collect': H.notify(`Recovered <b>${esc(a.name)}</b> <span class="muted">${a.gradeLabel}</span>${g.artifacts.wielded === a.id ? ' — in hand' : g.artifacts.equipped.includes(a.id) ? ' — equipped' : ' — carried (press I)'}`, 'artifact', 7); A.play('pickup'); break;
-        case 'wield': H.notify(a ? `In hand: <b>${esc(a.name)}</b> <span class="muted">${esc(describeWeapon(a.weapon))}</span>` : "In hand: the <b>delver's pick</b>", 'artifact', 4); A.play('wield'); break;
+        case 'collect': H.notify(`Recovered <b>${esc(a.name)}</b> <span class="muted">${a.gradeLabel}</span>${g.artifacts.wielded === a.id ? ' — in hand' : g.artifacts.equipped.includes(a.id) ? ' — equipped' : ' — carried (press I)'}`, 'artifact', 7); A.fx('pickup'); break;
+        case 'wield': H.notify(a ? `In hand: <b>${esc(a.name)}</b> <span class="muted">${esc(describeWeapon(a.weapon))}</span>` : "In hand: the <b>delver's pick</b>", 'artifact', 4); A.fx('wield'); break;
         case 'no-weapon': H.notify("You carry no other weapon than the delver's pick.", 'info', 3); break;
-        case 'select': H.notify(`Ability ready: <b>${esc(ABILITIES[a.ability.type].label)}</b> <span class="muted">${esc(a.name)}</span>`, 'artifact', 2.5); A.play('tick'); break;
-        case 'identified': H.notify(`You now understand the <b>${esc(a.name)}</b>.`, 'artifact', 6); A.play('fact'); break;
+        case 'select': H.notify(`Ability ready: <b>${esc(ABILITIES[a.ability.type].label)}</b> <span class="muted">${esc(a.name)}</span>`, 'artifact', 2.5); A.fx('tick'); break;
+        case 'identified': H.notify(`You now understand the <b>${esc(a.name)}</b>.`, 'artifact', 6); A.fx('fact'); break;
         case 'cooldown': H.notify(`${esc(a.a.name)} is recharging (${Math.ceil(a.cd)} s)`, 'info', 2); break;
-        case 'lamp': A.play('lamp'); break;
+        case 'lamp': A.fx('lamp'); break;
         case 'ability': {
-          if (!ABILITIES[a.ability.type].kind) A.play('ability', p.pos);
+          if (!ABILITIES[a.ability.type].kind) A.fx('ability', p.pos);
           if (a.ability.type === 'pulse') { const n = D.pulse(80); H.notify(`Echo pulse: ${n} kinds of creature nearby.`, 'creature', 4); }
           if (a.ability.type === 'survey') { g.mapData.reveal(p.pos.x, p.pos.y, p.pos.z, 160); H.notify('Surveyed the surroundings — the map has grown.', 'route', 4); }
           if (a.ability.type === 'flare') H.notify('The flare floods the area with light.', 'info', 3);
@@ -844,7 +862,7 @@ export class App {
     const e = g.envProbe.state, info = g.layerInfo || { layer: 0 };
     // sound must never stop the picture: a failure here is reported once and skipped
     try {
-    this.audio.update(dt, {
+    this.audio.frame(dt, {
       pos: g.player.pos, layer: info.layer, zone: info.zone, enclosed: g.envEnclosed || 0, altitude: e.altitude,
       water: e.water, river: e.river, fall: e.fall, city: e.city, chasm: e.chasm, night: g.renderer.night > 0.5,
       reeling: g.grapple.attached && g.grapple.reeling, paying: g.grapple.attached && g.grapple.paying,

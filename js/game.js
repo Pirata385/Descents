@@ -81,8 +81,12 @@ export class Game {
   progress(stage, p) { if (this.hooks.onProgress) this.hooks.onProgress(stage, p); }
 
   async generatePlan(seed) {
+    // chunk builders: enough to stream the world, but on small devices they must
+    // leave the cores to the game itself (or every new area makes the frame rate drop)
     const hw = navigator.hardwareConcurrency || 4;
-    const n = clamp(hw - 1, 2, 6);
+    const mem = navigator.deviceMemory || 8;
+    const small = hw <= 4 || mem <= 4 || this.settings.quality === 'low';
+    const n = small ? 2 : clamp(hw - 2, 2, 5);
     let pool = createWorkerPool(n);
     const tryPlan = (pool) => new Promise((resolve, reject) => {
       const w = pool[0].worker;
@@ -124,7 +128,7 @@ export class Game {
     this.world = new World(plan);
     this.renderer = new GameRenderer(this.canvas, plan, this.settings);
     this.camera = this.renderer.camera;
-    this.chunks = new ChunkManager({ world: this.world, scene: this.renderer.scene, workers: this.pool, quality: this.settings.viewDistance || 1.0, renderChunks: this.settings.renderChunks || 12 });
+    this.chunks = new ChunkManager({ world: this.world, scene: this.renderer.scene, workers: this.pool, quality: this.settings.viewDistance || 1.0, renderChunks: this.settings.renderChunks || 12, ...chunkDetail(this.settings) });
     if (this.hooks.onWorldReady) await this.hooks.onWorldReady(this, save);
     // initial streaming around the start position
     const focus = this.focusPoint();
@@ -200,6 +204,13 @@ export class Game {
     for (const s of this.systems) if (s.lateUpdate) s.lateUpdate(dt);
     this.renderer.render();
   }
+}
+
+/** Mesh detail for the chunk builders: coarse far chunks and thinner vegetation on the lowest settings. */
+export function chunkDetail(s) {
+  const low = s.quality === 'low' || (s.viewDistance ?? 1) < 0.6;
+  const p = s.particles ?? 1;
+  return { lowDetail: low, foliage: p >= 0.99 ? 1 : Math.max(0.35, Math.min(1, p + 0.1)) };
 }
 
 /** Draw the world without advancing the simulation (waiting screens, after a resize). */

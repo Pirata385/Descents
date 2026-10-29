@@ -13,7 +13,10 @@ export class Sky {
       uSunColor: { value: new THREE.Color(1, 0.9, 0.7) },
       uDepthDim: { value: 1 },
       uFogColor: shared.uFogColor,
+      uFogEdge: shared.uFogEdge,
+      uWell: { value: 0 },
     };
+    this.plainY = params.plainY;
     const geo = new THREE.SphereGeometry(5000, 32, 16);
     const mat = new THREE.ShaderMaterial({
       uniforms: this.uniforms,
@@ -36,6 +39,8 @@ uniform vec3 uHorizon;
 uniform vec3 uSunColor;
 uniform float uDepthDim;
 uniform vec3 uFogColor;
+uniform float uFogEdge;
+uniform float uWell;
 varying vec3 vDir;
 float sh(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 float sn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -71,6 +76,9 @@ void main() {
   // the low sky takes the colour of the fog, so the end of the render distance
   // melts into it instead of showing a band
   sky = mix(sky * uDepthDim, uFogColor, (1.0 - smoothstep(-0.05, 0.22, h)) * 0.9);
+  // down in the Great Fault the open sky is hundreds of metres up: through that much
+  // haze it fades into the fog like the far walls (uWell = depth below the plain)
+  sky = mix(sky, uFogColor, smoothstep(uFogEdge * 0.6, uFogEdge * 0.97, uWell / max(h, 0.01)));
   gl_FragColor = vec4(sky, 1.0);
   #include <colorspace_fragment>
 }`,
@@ -128,5 +136,6 @@ void main() {
     this.uniforms.uHorizon.value.copy(palette.horizon);
     this.uniforms.uSunColor.value.copy(palette.sun);
     this.uniforms.uDepthDim.value = palette.skyDim;
+    this.uniforms.uWell.value = Math.max(0, this.plainY - camPos.y);
   }
 }

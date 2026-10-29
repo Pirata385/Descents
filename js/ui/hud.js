@@ -106,8 +106,9 @@ export class HUD {
     const slow = this.textTimer <= 0;
     if (slow) this.textTimer = 0.1;
     if (slow) this.set('.ch-dist', aim ? `${Math.round(aim.dist)} m` : '');
-    // compass
-    this.updateCompass(p);
+    // compass (rebuilt 20 times a second: it is a strip of HTML)
+    this.compassT = (this.compassT || 0) - dt;
+    if (this.compassT <= 0) { this.compassT = 0.05; this.updateCompass(p); }
     // depth
     if (slow) {
       const info = g.layerInfo;

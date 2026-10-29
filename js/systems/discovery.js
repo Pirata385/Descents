@@ -328,8 +328,10 @@ export class Discovery {
     const g = this.game, p = g.player;
     if (!p) return;
     this.timer -= dt;
-    // the creature in the centre of view (for observing and the HUD)
-    this.updateFocus(dt);
+    // the creature in the centre of view (for observing and the HUD): every frame
+    // while observing, a few times a second otherwise (it casts a line of sight)
+    this.focusT = (this.focusT || 0) - dt;
+    if (p.zoomed || this.focusT <= 0) { this.updateFocus(p.zoomed ? dt : 0.12 - this.focusT); this.focusT = 0.12; }
     if (this.timer <= 0) {
       this.timer = 0.3;
       this.scanCreatures(0.3);

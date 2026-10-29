@@ -119,6 +119,7 @@ export class MeshBuffer {
 
   transferables(out) {
     if (!out) return [];
+    if (Array.isArray(out)) return out.flatMap((o) => this.transferables(o));
     const t = [out.pos.buffer, out.nrm.buffer, out.col.buffer, out.lit.buffer, out.idx.buffer];
     if (out.sway) t.push(out.sway.buffer);
     return t;
@@ -302,4 +303,51 @@ export class Template {
     const e = this.vert(...p3, nx, ny, nz, c, 1, opts.emi ?? 0, s1);
     this.tri(a, b, d); this.tri(a, d, e);
   }
+}
+
+/**
+ * Cut an exported mesh into horizontal slabs `step` metres tall (triangles go
+ * by their centroid). Tall chunks (the walls of the Great Fault, the shaft)
+ * become several meshes, each with its own bounds, so the parts far above or
+ * below the explorer can be skipped. Short meshes come back as they are.
+ */
+export function sliceByHeight(m, step = 64, minSpan = 96) {
+  if (!m) return m;
+  const P = m.pos, I = m.idx, nv = m.count;
+  let y0 = Infinity, y1 = -Infinity;
+  for (let v = 0; v < nv; v++) { const y = P[v * 3 + 1]; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  if (y1 - y0 <= minSpan) return m;
+  const nb = Math.ceil((y1 - y0 + 1e-3) / step);
+  const band = new Int32Array(I.length / 3);
+  const triCount = new Int32Array(nb);
+  for (let t = 0, k = 0; t < I.length; t += 3, k++) {
+    const yc = (P[I[t] * 3 + 1] + P[I[t + 1] * 3 + 1] + P[I[t + 2] * 3 + 1]) / 3;
+    const b = Math.min(nb - 1, Math.floor((yc - y0) / step));
+    band[k] = b; triCount[b]++;
+  }
+  const out = [];
+  const map = new Int32Array(nv);
+  for (let b = 0; b < nb; b++) {
+    if (!triCount[b]) continue;
+    map.fill(-1);
+    let n = 0;
+    const idx = new Uint32Array(triCount[b] * 3);
+    let ii = 0;
+    for (let t = 0, k = 0; t < I.length; t += 3, k++) {
+      if (band[k] !== b) continue;
+      for (let q = 0; q < 3; q++) { const v = I[t + q]; if (map[v] < 0) map[v] = n++; idx[ii++] = map[v]; }
+    }
+    const part = { count: n, pos: new Float32Array(n * 3), nrm: new Int8Array(n * 3), col: new Uint8Array(n * 3), lit: new Uint8Array(n * 4), sway: m.sway ? new Uint8Array(n) : null, idx: n < 65536 ? Uint16Array.from(idx) : idx };
+    for (let v = 0; v < nv; v++) {
+      const j = map[v];
+      if (j < 0) continue;
+      part.pos[j * 3] = P[v * 3]; part.pos[j * 3 + 1] = P[v * 3 + 1]; part.pos[j * 3 + 2] = P[v * 3 + 2];
+      part.nrm[j * 3] = m.nrm[v * 3]; part.nrm[j * 3 + 1] = m.nrm[v * 3 + 1]; part.nrm[j * 3 + 2] = m.nrm[v * 3 + 2];
+      part.col[j * 3] = m.col[v * 3]; part.col[j * 3 + 1] = m.col[v * 3 + 1]; part.col[j * 3 + 2] = m.col[v * 3 + 2];
+      part.lit[j * 4] = m.lit[v * 4]; part.lit[j * 4 + 1] = m.lit[v * 4 + 1]; part.lit[j * 4 + 2] = m.lit[v * 4 + 2]; part.lit[j * 4 + 3] = m.lit[v * 4 + 3];
+      if (m.sway) part.sway[j] = m.sway[v];
+    }
+    out.push(part);
+  }
+  return out.length === 1 ? out[0] : out;
 }

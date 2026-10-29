@@ -378,22 +378,24 @@ Each layer has its own lighting, fog, sky, particles (pollen, fireflies,
 spores, cave dust, the pale dust of the fault, the drizzle of the goblets)
 and sound. Days and nights pass (one game hour per real minute). The Great
 Fault is bright and misty: daylight scattered by haze between its pale
-walls, a little cooler deeper down, dimmer inside the caves. All audio is
-synthesised live: wind (and the updraft howling through the fault), rivers,
-lakes, waterfalls, cave drips, scree falls, wingbeats in the tube, the
-chimes of the goblet cavern, the city, footsteps per ground material, the
-arm's winch, every species' own call derived from its genome, combat and
-abilities, the warden's roar and its drums, and generative music whose
-scale and instruments change with each layer.
-Reverb follows the space: tight in passages, vast in the tube, with an
-echo off its far wall. A compressor, make-up gain and limiter keep the mix
-at a normal listening level. A watchdog keeps it audible: everything that
-reaches the audio graph is checked, the output is listened to, and if it ever
-carries an invalid value or falls silent when it should not, the graph (or
-the audio context) is rebuilt; a suspended context is resumed by itself and
-one-shot voices are capped so swarms cannot overload slow devices. Browsers
-only start sound after a click, tap or key press; if you start with a
-controller, the game tells you when it is still waiting for one.
+walls, a little cooler deeper down, dimmer inside the caves.
+
+Every sound is procedural but none is synthesised while you play: when the
+game starts, a worker bakes them all into samples — wind (and the updraft
+howling through the fault), rivers, lakes, waterfalls, rain in the goblet
+cavern, cave air and drips, scree falls, wingbeats, birds and crickets, the
+city, footsteps per ground material, the arm and its winch, combat and
+abilities, the warden's roar and drums, the instruments of the music, and
+every species' own call made from its genome. They are played back from a
+small pool of voices: distance becomes volume, direction becomes stereo
+balance, far sounds pass through a muffling filter and the Great Fault has
+an echo off its far wall. Ambience beds fade in and out with the
+surroundings, and generative music plays the layer's scale with its own
+pad and lead instruments. Sound starts with the first click, tap or key
+press (the browser's rule) and any later one wakes it if the browser put
+it to sleep; on iPhones and iPads it also plays with the ring/silent switch
+on; *Settings → Audio → Sound check* plays a test sound and says what state
+sound is in.
 
 ---
 
@@ -439,7 +441,7 @@ js/creatures/         creature system
   warden.js             the warden of the Throne Cup (Layer 4's optional mini boss)
 js/artifacts/         artifact generation, models, in-world artifact system
 js/systems/           discovery, map exploration data, environment probe, saves, combat (weapons, abilities, damage)
-js/audio/             procedural audio engine
+js/sound/             the sound engine (sound.js), baked sound recipes (recipes.js, dsp.js) and their worker
 js/ui/                app shell (menus), HUD, journal, maps, 3D previews, touch controls
 tests/                automated tests (npm test)
 tools/                browser tests, screenshots, debug renders
@@ -462,7 +464,14 @@ explorer with levels of detail inside that radius, meshed in parallel web
 workers, and a fog closes in towards the edge so the world fades out instead
 of ending at a visible border (fog distances are measured from the eye, so
 the edge does not swing as you turn). *Terrain detail* sets how far full
-detail reaches. Creatures live within an area that follows the render
+detail reaches; below 60% (and on the Low preset) chunks beyond the nearest
+ones are meshed with cells twice as large (a quarter of the triangles), the
+vegetation is thinner and the terrain skips its per-pixel rock grain.
+Tall chunks (the walls of the Great Fault drop a kilometre) are cut into
+slabs 64 m high, and slabs out of view or beyond the fog are not drawn.
+Hidden chunks are kept only briefly, and once a chunk's mesh is on the GPU its
+copy in memory is dropped, so memory stays bounded however far you explore.
+Creatures live within an area that follows the render
 distance (up to ~170 m, 16–96 at a time, by setting) with the rest of the
 ecosystem simulated abstractly; distant individuals think, move and animate
 at a lower rate, their skins are built in a worker, and each body is a
@@ -519,7 +528,8 @@ npm run test:traverse  # an autopilot walks every guaranteed route, the fault ca
 npm run test:grapple   # climb a rim cliff using only the grappling arm
 npm run test:mobile    # emulated phone: touch controls, landscape/portrait, journal, pause, layout
 npm run test:gamepad   # a scripted PS4 controller: menus, settings, play, journal, pause, rumble
-npm run test:audio     # the sound comes back by itself after NaN, a dead graph or a suspended context
+npm run test:audio     # sound starts on the first click, ambience and footsteps play, pause/resume, a suspended context wakes
+npm run test:perf      # a long exploration on the Low preset: frame cost by system, memory, chunks and triangles
 ```
 
 Set `BASE_URL` if the server runs elsewhere.

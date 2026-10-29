@@ -105,18 +105,25 @@ ${COMMON_PARS}`)
     float hb = dHash(band * 1.37);
     if (vWPos.y < -870.0) {
       // the Great Fault: pale limestone beds, granite speckle lower down
+#ifdef CHEAP
+      diffuseColor.rgb *= 0.9 + 0.14 * dHash(floor(vWPos.y / 1.7) * 1.91);
+#else
       float bed = floor(vWPos.y / 1.7 + dNoise(vWPos * vec3(0.02, 0.0, 0.02)) * 2.0);
       diffuseColor.rgb *= 0.9 + 0.14 * dHash(bed * 1.91);
       float speck = smoothstep(0.72, 0.8, dNoise(vWPos * 2.3)) * smoothstep(-1150.0, -1300.0, vWPos.y);
       diffuseColor.rgb *= 1.0 - 0.18 * speck;
       diffuseColor.rgb *= 0.95 + 0.1 * dNoise(vWPos * vec3(0.3, 1.2, 0.3));
+#endif
     } else {
       diffuseColor.rgb *= 0.84 + 0.3 * hb;
       diffuseColor.rgb += vec3(0.035, 0.015, -0.012) * (dHash(band + 17.0) - 0.5);
+#ifndef CHEAP
       diffuseColor.rgb *= 0.92 + 0.16 * dNoise(vWPos * vec3(0.35, 1.6, 0.35));
+#endif
     }
   }
   float camDist = length(vWPos - uCamPos);
+#ifndef CHEAP
   if (vNy > 0.5) {
     vec2 p = vWPos.xz / uHexScale;
     float rr = p.y / 0.8660254; float qq = p.x - rr * 0.5;
@@ -133,7 +140,9 @@ ${COMMON_PARS}`)
     diffuseColor.rgb *= 0.9 + 0.2 * grain;
   } else {
     diffuseColor.rgb *= 0.94 + 0.12 * dNoise(vWPos * vec3(1.3, 2.0, 1.3));
-  }` : ''}`)
+  }
+#endif
+  ` : ''}`)
     .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
   {
     float sky = vLight.x;
@@ -172,15 +181,20 @@ ${COMMON_PARS}`)
   }`);
 }
 
-export function makeTerrainMaterial(hexScale) {
+/**
+ * cheap: the lowest settings skip the per-pixel noise (rock grain, strata wobble,
+ * hex outlines) that costs slow graphics chips most of their time.
+ */
+export function makeTerrainMaterial(hexScale, cheap = false) {
   const m = new THREE.MeshLambertMaterial({ vertexColors: true });
+  if (cheap) m.defines = { CHEAP: '' };
   m.userData.hexScale = { value: hexScale };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, shared, { uHexScale: m.userData.hexScale });
     patchCommonVertex(shader, false);
     patchCommonFragment(shader, { terrain: true });
   };
-  m.customProgramCacheKey = () => 'terrain';
+  m.customProgramCacheKey = () => (m.defines && m.defines.CHEAP !== undefined ? 'terrain-cheap' : 'terrain');
   return m;
 }
 
