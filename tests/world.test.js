@@ -144,6 +144,60 @@ export async function worldTests(seeds, plans) {
       note(`${F.halls.length} halls · ${kinds.fault || 0} passages · ${F.sinkholes.length} sinkholes · ${F.windows.length} windows · ${F.dens.length} dens · ${F.nests.length} nests · chasm ${widths.map((w) => w.toFixed(0)).join('/')} m wide, floor ${p.chasm.floorY.toFixed(0)} m${plan.validation.pruned ? ` · pruned ${plan.validation.pruned.length}` : ''}`);
     });
 
+    await test(`[${seed}] Layer 4: goblets with shallow lakes, falls and a walkable chain from the Gate Stair to the floor`, () => {
+      const d = plan.layer4;
+      assert(d, 'no Layer 4');
+      const G = d.goblets;
+      assert(d.chain.length >= 5, `the goblet chain is too short (${d.chain.length})`);
+      assert(d.foot, 'no root ramp down to the floor of the deep');
+      assert(d.boss, 'no Throne Cup for the warden');
+      assert(d.cascades.length >= 1, 'no cascade of small cups');
+      const into = d.falls.filter((f) => f.into >= 0).length;
+      assert(into >= 3, `too few falls pour into a lower lake (${into})`);
+      const gen = new ColumnGen(plan), col = new ColumnData();
+      // every cup holds a shallow lake
+      for (const g of G) {
+        let wet = 0;
+        for (let k = 0; k < 8; k++) {
+          const a = k * 0.785, r = (g.Rc - g.rimW - 7) * (0.2 + 0.1 * k);
+          gen.column(g.x + Math.cos(a) * r, g.z + Math.sin(a) * r, 0, col);
+          for (let w = 0; w < col.nw; w++) if (Math.abs(col.wl[w] - g.water) < 0.3) { wet++; break; }
+        }
+        assert(wet >= 5, `${g.name} holds no lake (${wet}/8 wet)`);
+      }
+      // walk the chain on the column data: rim arcs (round the notch) and root bridges
+      const pts = [];
+      const arc = (gb, a1, a2) => {
+        const r = gb.Rc - gb.rimW * 0.5;
+        let da = Math.atan2(Math.sin(a2 - a1), Math.cos(a2 - a1));
+        const hits = (span) => { for (let k = 0; k <= 40; k++) { const a = a1 + (span * k) / 40; if (Math.abs(Math.atan2(Math.sin(a - gb.notch.ang), Math.cos(a - gb.notch.ang))) < gb.notch.hw + 0.12) return true; } return false; };
+        if (gb.notch && hits(da)) da = da > 0 ? da - Math.PI * 2 : da + Math.PI * 2;
+        const n = Math.max(2, Math.ceil(Math.abs(da) * r / 1.5));
+        for (let k = 0; k <= n; k++) { const a = a1 + (da * k) / n; pts.push([gb.x + Math.cos(a) * r, gb.yRim, gb.z + Math.sin(a) * r]); }
+      };
+      let cur = G[d.chain[0]], curA = Math.atan2(d.exit.z - cur.z, d.exit.x - cur.x);
+      for (const b of d.bridges) {
+        if (b.kind === 'branch' || b.from !== cur.id) continue;
+        arc(cur, curA, Math.atan2(b.az - cur.z, b.ax - cur.x));
+        const n = Math.ceil(Math.hypot(b.bx - b.ax, b.bz - b.az) / 1.5);
+        for (let k = 0; k <= n; k++) { const t = k / n; pts.push([b.ax + (b.bx - b.ax) * t, b.ay + (b.by - b.ay) * t, b.az + (b.bz - b.az) * t]); }
+        if (b.to < 0) break;
+        cur = G[b.to]; curA = Math.atan2(b.bz - cur.z, b.bx - cur.x);
+      }
+      let prev = null, bad = 0, worst = '';
+      for (const [x, y, z] of pts) {
+        gen.column(x, z, 0, col);
+        // the floor near the expected height, with headroom above it
+        let f = -Infinity, ceil = Infinity;
+        for (let i = 0; i < col.n; i++) if (col.y1[i] <= y + 1.6 && col.y1[i] > f) { f = col.y1[i]; ceil = i + 1 < col.n ? col.y0[i + 1] : Infinity; }
+        const ok = f > y - 2.2 && ceil - f > 2.4 && (prev === null || f - prev < 0.9);
+        if (!ok) { bad++; if (!worst) worst = `at ${x.toFixed(0)},${y.toFixed(0)},${z.toFixed(0)}: floor ${f} ceiling ${ceil} prev ${prev}`; }
+        prev = f;
+      }
+      note(`${G.length} goblets (chain ${d.chain.length}, cascades ${d.cascades.map((c) => c.cups.length).join('/')}), ${d.bridges.length} root bridges, ${d.falls.length} falls (${into} into lower lakes) · chain walk ${pts.length} points, ${bad} bad${worst ? ' · first: ' + worst : ''}`);
+      assert(bad <= 2, `the goblet chain cannot be walked: ${worst}`);
+    });
+
     await test(`[${seed}] guaranteed routes validate (city → Layer 1 → Layer 2 → the Stone Plain)`, () => {
       const v = plan.validation.routes;
       const byName = new Map(v.map((r) => [r.name, r]));

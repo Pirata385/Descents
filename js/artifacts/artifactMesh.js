@@ -184,6 +184,104 @@ export function buildArtifactModel(art) {
       add(new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), acc), 0.14, 0.5, 0.18);
       break;
     }
+    case 'lantern': {
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.06, sym + 3), main), 0, 0.05);
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.16, 0.06, sym + 3), main), 0, 0.68);
+      for (let i = 0; i < sym; i++) { const an = (i / sym) * Math.PI * 2; add(new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.62, 4), main), Math.cos(an) * 0.17, 0.37, Math.sin(an) * 0.17); }
+      add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.11 + a * 0.04, 1), acc), 0, 0.37).userData.pulse = true;
+      add(new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.015, 6, 12), main), 0, 0.82);
+      break;
+    }
+    case 'eye': {
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.3, 18, 14), main), 0, 0.45);
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 10), acc), 0, 0.45, 0.2).scale.set(1, 1, 0.5);
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), new THREE.MeshStandardMaterial({ color: 0x050505 })), 0, 0.45, 0.27);
+      for (let i = 0; i < sym; i++) { const an = (i / sym) * Math.PI * 2; add(new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.22 + b * 0.15, 4), main), Math.cos(an) * 0.32, 0.45 + Math.sin(an) * 0.32, -0.05, 0, 0, an - Math.PI / 2); }
+      break;
+    }
+    case 'mirror': {
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.03, 28), new THREE.MeshStandardMaterial({ color: 0xcfd8e0, metalness: 0.9, roughness: 0.05 })), 0, 0.55, 0, Math.PI / 2);
+      add(new THREE.Mesh(new THREE.TorusGeometry(0.33, 0.035, 6, 28), main), 0, 0.55);
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.32, 6), main), 0, 0.12);
+      if (S.inlay) for (let i = 0; i < sym; i++) { const an = (i / sym) * Math.PI * 2; add(new THREE.Mesh(new THREE.OctahedronGeometry(0.04), acc), Math.cos(an) * 0.36, 0.55 + Math.sin(an) * 0.36, 0.02); }
+      break;
+    }
+    case 'feather': {
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.02, 0.95, 5), main), 0, 0.47, 0, 0, 0, 0.15);
+      for (let i = 0; i < 9; i++) {
+        const t = i / 8;
+        for (const sd of [-1, 1]) add(new THREE.Mesh(new THREE.BoxGeometry(0.2 * Math.sin(Math.PI * (0.2 + t * 0.8)) + 0.04, 0.06, 0.008), i % 3 === 0 ? acc : main), sd * 0.07 - t * 0.07, 0.2 + t * 0.7, 0, 0, 0, sd * 0.5 + 0.15);
+      }
+      break;
+    }
+    case 'claw': {
+      add(new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.03, 6, 16), main), 0, 0.82);
+      for (let i = 0; i < 3; i++) { const m = add(new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.55, 5), i === 1 ? acc : main), (i - 1) * 0.1, 0.45, 0, 0.3, 0, (i - 1) * 0.25 + Math.PI); m.scale.set(1, 1, 0.6); }
+      break;
+    }
+    case 'caster': {
+      // a crossbow-like bolt caster with a glowing limb
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.8), main), 0, 0.45);
+      add(new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.025, 6, 24, Math.PI), acc), 0, 0.45, -0.25, Math.PI / 2, 0, 0);
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.22, 0.12), main), 0, 0.3, 0.25);
+      add(new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.16, 4), acc), 0, 0.5, -0.45, -Math.PI / 2);
+      break;
+    }
+    case 'spindle': {
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1, 6), main), 0, 0.5);
+      for (let i = 0; i < 3; i++) { const m = add(new THREE.Mesh(new THREE.TorusGeometry(0.28 - i * 0.06, 0.025, 6, 24), i % 2 ? acc : main), 0, 0.3 + i * 0.2, 0, Math.PI / 2 + i * 0.4, i); m.userData.spin = 0.6 + i * 0.4; }
+      add(new THREE.Mesh(new THREE.OctahedronGeometry(0.08), acc), 0, 0.98);
+      break;
+    }
+    case 'lance': {
+      // a long rod with lens rings: it holds a ray of light
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 1.2, 8), main), 0, 0.55);
+      for (let i = 0; i < 3; i++) add(new THREE.Mesh(new THREE.TorusGeometry(0.09 + i * 0.02, 0.018, 6, 16), acc), 0, 0.75 + i * 0.12, 0, Math.PI / 2).userData.spin = 1 + i;
+      add(new THREE.Mesh(new THREE.OctahedronGeometry(0.1), acc), 0, 1.22).userData.pulse = true;
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.18, 8), main), 0, 0.08);
+      break;
+    }
+    case 'maul': {
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.85, 8), main), 0, 0.42);
+      const head = add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.42, sym + 3), acc), 0, 0.92, 0, 0, 0, Math.PI / 2);
+      head.scale.set(1, 1, 0.9);
+      if (S.spikes) for (let i = 0; i < sym; i++) { const an = (i / sym) * Math.PI * 2; add(new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.16, 4), main), 0, 0.92 + Math.cos(an) * 0.22, Math.sin(an) * 0.22, an, 0, 0); }
+      break;
+    }
+    case 'flail': {
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.45, 8), main), 0, 0.22);
+      for (let i = 0; i < 5; i++) add(new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.012, 5, 8), main), 0.02 * i, 0.5 + i * 0.07, 0, (i % 2) * Math.PI / 2);
+      add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.13, 0), acc), 0.12, 0.88);
+      for (let i = 0; i < 6; i++) { const an = (i / 6) * Math.PI * 2; add(new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.1, 4), acc), 0.12 + Math.cos(an) * 0.13, 0.88 + Math.sin(an) * 0.13, 0, 0, 0, an - Math.PI / 2); }
+      break;
+    }
+    case 'shardbow': {
+      add(new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.03, 6, 20, Math.PI * 0.9), main), 0, 0.5, 0, 0, 0, Math.PI * 0.55);
+      for (let i = 0; i < 5; i++) add(new THREE.Mesh(new THREE.OctahedronGeometry(0.06 + (i % 2) * 0.03), acc), -0.05 + i * 0.03, 0.3 + i * 0.1, 0.05).userData.spin = 1 + i * 0.3;
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.8, 3), acc), 0.18, 0.5);
+      break;
+    }
+    case 'horn': {
+      for (let i = 0; i < 10; i++) {
+        const t = i / 9;
+        add(new THREE.Mesh(new THREE.TorusGeometry(0.03 + (1 - t) * 0.12, 0.02 + (1 - t) * 0.035, 6, 12), i % 3 === 0 ? acc : main), Math.sin(t * 2.4) * 0.3, 0.1 + t * 0.8, Math.cos(t * 2.4) * 0.1 - 0.1, Math.PI / 2 - t * 1.2, 0, t);
+      }
+      break;
+    }
+    case 'cage': {
+      for (let i = 0; i < sym; i++) add(new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.015, 5, 24), main), 0, 0.45, 0, 0, (i / sym) * Math.PI);
+      add(new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.015, 5, 24), main), 0, 0.45, 0, Math.PI / 2);
+      const core = add(new THREE.Mesh(new THREE.DodecahedronGeometry(0.13), acc), 0, 0.45);
+      core.userData.spin = 0.8; core.userData.pulse = true;
+      break;
+    }
+    case 'censer': {
+      add(lathe([[0, 0], [0.18, 0.02], [0.24, 0.12], [0.2, 0.3], [0.08, 0.34]], 14, main), 0, 0.12);
+      add(lathe([[0, 0.25], [0.12, 0.22], [0.2, 0.1], [0.22, 0.0]], 14, acc), 0, 0.42);
+      for (let i = 0; i < 3; i++) { const an = (i / 3) * Math.PI * 2; add(new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.5, 3), main), Math.cos(an) * 0.18, 0.9, Math.sin(an) * 0.18, Math.sin(an) * 0.3, 0, -Math.cos(an) * 0.3); }
+      add(new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 5, 10), main), 0, 1.15);
+      break;
+    }
     default: add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.3, 1), main), 0, 0.4);
   }
   if (S.twist) g.rotation.z = S.twist * 0.2;
@@ -195,6 +293,7 @@ export function buildArtifactModel(art) {
 let glowTex = null;
 export function glowTexture() {
   if (glowTex) return glowTex;
+  if (typeof document === 'undefined') return null; // headless (tests): a plain sprite
   const c = document.createElement('canvas');
   c.width = c.height = 64;
   const ctx = c.getContext('2d');

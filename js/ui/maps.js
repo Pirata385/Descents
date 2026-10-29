@@ -7,6 +7,7 @@
 import { MATERIALS } from '../world/materials.js';
 import { LAYERS, LAYER_BOUNDARIES } from '../world/layers.js';
 import { MAP_W, MAP_H, RES, X0, Z0, BANDS, F_EXPLORED, F_WATER, F_VOID, F_ROUTE, F_BUILDING, bandOf } from '../systems/mapdata.js';
+import { wallR } from '../world/goblets.js';
 import { clamp, lerp } from '../core/mathutil.js';
 
 const PARCH = [0.86, 0.8, 0.66];
@@ -14,6 +15,7 @@ const ICONS = {
   eye: '◎', waterfall: '≋', lake: '◌', gate: '⛩', guild: '⚑', market: '⌂', temple: '⛫', observatory: '✧', hamlet: '⌂', platform: '▿',
   ruin: '♜', arch: '∩', spire: '▲', station: '⚑', gallery: '♣', plain: '◇', stair: '≡', fault: '✕', cave: '●', crystal: '✦',
   sinkhole: '◉', hall: '⌓', window: '◫', rookery: '⋔', basin: '◒', fourthgate: '∏',
+  goblet: '⍖', throne: '♛', cascade: '≋', mere: '◌', gatestair: '⌇',
 };
 
 /** Draw a label unless it would overlap one already placed (nudges it first). */
@@ -297,6 +299,11 @@ export class TopDownMap {
       const ym = Math.max(this.game.plan.params.chasm.floorY + 8, (Math.min(B.top, -900) + Math.max(B.bottom, -1960)) / 2);
       const [cx, cz] = ch.centreAt(ym);
       this.contour(ctx, (th) => { const r = ch.wallDist(th, ym); return [cx + Math.cos(th) * r, cz + Math.sin(th) * r]; }, 'rgba(200,60,40,0.95)', [5, 3], this.band === BANDS.length - 1 ? 'The Basin' : 'The Great Fault');
+      // Layer 4: the walls of the cavern of the goblets
+      const d4 = this.game.plan.layer4;
+      if (this.band === BANDS.length - 1 && d4 && this.disc.layers.has(4)) {
+        this.contour(ctx, (th) => { const r = wallR(d4, th); return [d4.C.x + Math.cos(th) * r, d4.C.z + Math.sin(th) * r]; }, 'rgba(90,190,220,0.9)', [6, 4], d4.name);
+      }
     }
   }
 
@@ -580,7 +587,7 @@ export class VerticalMap {
   drawSection(ctx, x, y, w, h) {
     const g = this.game, P = this.profile;
     if (!P) return;
-    const yTop = 90, yBot = -2000;
+    const yTop = 90, yBot = -2400;
     const sx = (r) => x + (r / P.rMax) * w;
     const sy = (v) => y + ((yTop - v) / (yTop - yBot)) * h;
     // sky and abyss gradient

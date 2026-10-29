@@ -17,9 +17,24 @@ function init(plan) {
   mesher = new ChunkMesher(gen, flora, plan);
 }
 
+/** Bounding sphere of a mesh (centre of its box, farthest vertex), so the main thread need not compute it. */
+function bounds(m) {
+  const p = m.pos;
+  if (!p || !p.length) return;
+  let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+  for (let i = 0; i < p.length; i += 3) {
+    const x = p[i], y = p[i + 1], z = p[i + 2];
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (z < z0) z0 = z; if (z > z1) z1 = z;
+  }
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
+  let r2 = 0;
+  for (let i = 0; i < p.length; i += 3) { const dx = p[i] - cx, dy = p[i + 1] - cy, dz = p[i + 2] - cz; const d = dx * dx + dy * dy + dz * dz; if (d > r2) r2 = d; }
+  m.bs = [cx, cy, cz, Math.sqrt(r2)];
+}
+
 function transferList(out) {
   const t = [];
-  for (const k of ['terrain', 'water', 'falls', 'foliage']) if (out[k]) t.push(...MeshBuffer.prototype.transferables(out[k]));
+  for (const k of ['terrain', 'water', 'falls', 'foliage', 'terrainDeep', 'waterDeep', 'fallsDeep', 'foliageDeep']) if (out[k]) t.push(...MeshBuffer.prototype.transferables(out[k]));
   if (out.spans) t.push(out.spans.start.buffer, out.spans.y.buffer, out.spans.mat.buffer, out.spans.water.buffer, out.spans.flow.buffer, out.spans.flags.buffer);
   return t;
 }
@@ -37,6 +52,7 @@ self.onmessage = (e) => {
     } else if (msg.type === 'chunk') {
       const t0 = performance.now();
       const out = mesher.build(msg.L, msg.cq, msg.cr);
+      for (const k of ['terrain', 'water', 'falls', 'foliage', 'terrainDeep', 'waterDeep', 'fallsDeep', 'foliageDeep']) if (out[k]) bounds(out[k]);
       out.ms = performance.now() - t0;
       self.postMessage({ type: 'chunk', key: msg.key, out }, transferList(out));
     }

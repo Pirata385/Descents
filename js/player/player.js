@@ -349,8 +349,11 @@ export class Player {
     void wish; void moving;
   }
 
-  hurt(amount, cause) {
+  /** Damage; source is the creature that dealt it (for thorns). Shields and armour come first. */
+  hurt(amount, cause, source = null) {
     if (this.mode === 'dead' || this.game.settings.godMode) return;
+    if (this.game.combat) amount = this.game.combat.absorb(amount, cause, source);
+    if (!(amount > 0)) return;
     this.health -= amount;
     this.lastHurt = this.game.gameTime;
     this.emit('hurt', amount, cause);

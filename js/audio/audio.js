@@ -5,12 +5,29 @@
 //   genome (call type, pitch, rhythm, length), footsteps by ground material,
 //   the grappling arm, discoveries and the interface,
 // - generative music whose scale, tempo and instruments change per layer.
+//
+// Keeping it audible. Sound on the web can die silently in a few ways, and
+// each has a guard here:
+// - a NaN or infinity reaching the graph (from a bad position, a degenerate
+//   listener orientation, a filter pushed past its limits) poisons the
+//   compressor and every filter with memory, which then output silence or
+//   NaN forever. Every parameter is checked before use, the listener never
+//   faces straight up or down, and a watchdog listens to the output: when it
+//   finds NaN, or silence while the beds should be sounding, it rebuilds the
+//   whole mixing graph (and, if that keeps happening, the audio context).
+// - the browser suspending the context (another tab, a phone call, a device
+//   change): it is resumed as soon as possible, on any gesture or by itself.
+// - too many voices at once (swarms, rattles, fights) overload slow devices:
+//   one-shots beyond a voice budget are dropped, the least important first.
 import { clamp, lerp } from '../core/mathutil.js';
 
 // The sounds are synthesised at modest levels (band-passed noise carries little
 // energy); the output stage lifts the whole mix to a normal listening level and
 // a limiter keeps the peaks from clipping.
 const OUTPUT_GAIN = 2.2;   // about +7 dB on top of the compressor's own make-up gain
+const MAX_VOICES = 70;     // one-shot voices sounding at once
+const LOW_VOICES = 44;     // creature calls and ambient events stop here
+const fin = Number.isFinite;
 
 const LAYER_MUSIC = [
   { root: 146.83, scale: [0, 2, 4, 7, 9], chordLen: [9, 13], pad: 'warm', lead: 'pluck', density: 0.35, bright: 1600 },      // surface
@@ -34,6 +51,12 @@ export class AudioEngine {
     this.resting = false;
     this.eventTimer = 2;
     this.wantRunning = true;
+    this.voices = [];          // end times of the sounding one-shot voices
+    this.lowPri = false;
+    this.silentN = 0;
+    this.firstUpdate = 0;
+    this.rebuilds = [];
+    this.resumeT = 0;
     // browsers only let sound start from a click, tap or key press: any of them
     // (re)starts it, also after the phone was locked or another tab took over
     const unlock = () => {
@@ -56,6 +79,20 @@ export class AudioEngine {
     try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* unsupported */ }
     const ctx = this.ctx = new AC({ latencyHint: 'interactive' });
     if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    ctx.onstatechange = () => { if (ctx.state !== 'running' && ctx.state !== 'closed' && this.wantRunning) ctx.resume().catch(() => {}); };
+    // noise sources
+    this.white = this.noiseBuffer('white');
+    this.brown = this.noiseBuffer('brown');
+    this.pink = this.noiseBuffer('pink');
+    this.buildGraph();
+    this.ready = true;
+    // the watchdog runs on its own clock, so it works while the game loop is paused or throttled
+    if (!this.watchTimer) this.watchTimer = setInterval(() => { try { this.watchdog(0.5); } catch (err) { console.warn('audio watchdog', err); } }, 500);
+  }
+
+  /** The mixing graph: buses, compressor and limiter, reverbs, echo, ambience beds. */
+  buildGraph() {
+    const ctx = this.ctx;
     this.master = ctx.createGain();
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -24; comp.knee.value = 10; comp.ratio.value = 2.5; comp.attack.value = 0.008; comp.release.value = 0.3;
@@ -64,6 +101,12 @@ export class AudioEngine {
     limiter.threshold.value = -2; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.002; limiter.release.value = 0.12;
     this.master.connect(comp).connect(makeup).connect(limiter).connect(ctx.destination);
     this.outTap = limiter;
+    this.comp = comp; this.limiter = limiter; this.makeup = makeup;
+    // the watchdog listens here
+    this.probe = ctx.createAnalyser();
+    this.probe.fftSize = 512;
+    this.probeBuf = new Float32Array(this.probe.fftSize);
+    limiter.connect(this.probe);
     this.music = ctx.createGain(); this.music.connect(this.master);
     this.amb = ctx.createGain(); this.amb.connect(this.master);
     this.sfx = ctx.createGain(); this.sfx.connect(this.master);
@@ -94,13 +137,83 @@ export class AudioEngine {
     this.music.connect(this.musicSendBig);
     this.bigSend = 0;
     this.echoAmt = 0;
-    // noise sources
-    this.white = this.noiseBuffer('white');
-    this.brown = this.noiseBuffer('brown');
-    this.pink = this.noiseBuffer('pink');
     this.buildBeds();
     this.applyVolumes();
-    this.ready = true;
+    this.voices.length = 0;
+  }
+
+  /** Take the graph apart: stop every bed and loop, disconnect the buses. */
+  teardown() {
+    const stop = (n) => { try { n.stop(); } catch { /* not started or already stopped */ } };
+    for (const b of Object.values(this.beds || {})) { if (b.src) stop(b.src); if (b.oscs) b.oscs.forEach(stop); }
+    if (this.motor) stop(this.motor.o);
+    if (this.beamHum) this.beamHum.oscs.forEach(stop);
+    for (const n of [this.master, this.comp, this.makeup, this.limiter, this.music, this.amb, this.sfx, this.uiBus, this.reverb, this.reverbBig, this.reverbOut, this.reverbBigOut, this.echo, this.echoIn, this.sfxSend, this.sfxSendBig, this.musicSend, this.musicSendBig, this.probe]) {
+      try { if (n) n.disconnect(); } catch { /* already */ }
+    }
+  }
+
+  /**
+   * The output went bad (NaN) or silent when it should not be: rebuild the
+   * graph; when that keeps happening, start a new audio context.
+   */
+  recover(why, poisoned = false) {
+    const now = performance.now();
+    this.rebuilds = this.rebuilds.filter((t) => now - t < 60000);
+    this.rebuilds.push(now);
+    console.warn(`audio: ${why}, rebuilding the sound graph`);
+    this.teardown();
+    if (poisoned && this.rebuilds.length > 3 && this.ctx.state !== 'closed') {
+      // a fresh context: the browser allows it without a gesture once the page was used
+      const old = this.ctx;
+      this.ready = false;
+      this.ctx = null;
+      old.close().catch(() => {});
+      this.rebuilds.length = 0;
+      this.init();
+      return;
+    }
+    this.buildGraph();
+    this.musicLayer = -1;
+  }
+
+  /** Twice a second: is the output healthy? */
+  watchdog(dt) {
+    const ctx = this.ctx;
+    if (!ctx || !this.ready) return;
+    // a suspended or interrupted context comes back as soon as the browser lets it
+    if (ctx.state !== 'running') {
+      this.resumeT -= dt;
+      if (this.wantRunning && this.resumeT <= 0) { this.resumeT = 1.5; ctx.resume().catch(() => {}); }
+      this.silentN = 0;
+      return;
+    }
+    this.probe.getFloatTimeDomainData(this.probeBuf);
+    let peak = 0, bad = false;
+    for (let i = 0; i < this.probeBuf.length; i++) {
+      const v = this.probeBuf[i];
+      if (!fin(v)) { bad = true; break; }
+      const a = v < 0 ? -v : v;
+      if (a > peak) peak = a;
+    }
+    if (bad) { this.recover('the output carried NaN', true); return; }
+    // the ambience beds always breathe a little (a room tone at the least); total
+    // silence for 4 s while they are turned up means a dead graph
+    // (only while the game drives the beds: on the title screen they are still closed)
+    const s = this.settings;
+    const now = performance.now();
+    const expect = now - (this.lastUpdate || 0) < 5000 && now - this.firstUpdate > 6000 && now - (this.silentFix || 0) > 30000 && (s.volMaster ?? 0.8) > 0.05 && (s.volAmbience ?? 0.7) > 0.05;
+    if (peak >= 1e-7) this.silentN = 0;
+    else if (expect && ++this.silentN >= 8) { this.silentN = 0; this.silentFix = now; this.recover('the output fell silent'); }
+  }
+
+  /** Room for one more one-shot voice? (the least important go first) */
+  voice(end) {
+    const now = this.ctx.currentTime;
+    if (this.voices.length > 24) this.voices = this.voices.filter((t) => t > now);
+    if (this.voices.length >= (this.lowPri ? LOW_VOICES : MAX_VOICES)) return false;
+    this.voices.push(end);
+    return true;
   }
 
   applyVolumes() {
@@ -182,22 +295,31 @@ export class AudioEngine {
     // deep hum: two detuned oscillators
     const hg = ctx.createGain(); hg.gain.value = 0;
     const hf = ctx.createBiquadFilter(); hf.type = 'lowpass'; hf.frequency.value = 220;
+    const humOscs = [];
     for (const fr of [55, 55.7, 82.4]) {
-      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = fr; o.connect(hf); o.start();
+      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = fr; o.connect(hf); o.start(); humOscs.push(o);
     }
     hf.connect(hg).connect(this.amb);
-    this.beds.hum = { g: hg, f: hf };
+    this.beds.hum = { g: hg, f: hf, oscs: humOscs };
     // reel motor
     const mo = ctx.createOscillator(); mo.type = 'sawtooth'; mo.frequency.value = 80;
     const mf = ctx.createBiquadFilter(); mf.type = 'lowpass'; mf.frequency.value = 600;
     const mg = ctx.createGain(); mg.gain.value = 0;
     mo.connect(mf).connect(mg).connect(this.sfx); mo.start();
     this.motor = { o: mo, g: mg };
+    // the gamma ray: a crackling, singing hum while it pours
+    const bg = ctx.createGain(); bg.gain.value = 0;
+    const bf = ctx.createBiquadFilter(); bf.type = 'bandpass'; bf.frequency.value = 900; bf.Q.value = 0.7;
+    const oscs = [];
+    for (const [fr, ty] of [[110, 'sawtooth'], [220.6, 'square'], [880, 'sine']]) { const o = ctx.createOscillator(); o.type = ty; o.frequency.value = fr; o.connect(bf); o.start(); oscs.push(o); }
+    bf.connect(bg).connect(this.sfx);
+    this.beamHum = { g: bg, f: bf, oscs };
   }
 
   /** A panner at a world position (null = non-positional). */
   out(pos, bus = this.sfx, ref = 4) {
-    if (!pos) return bus;
+    if (!pos || !fin(pos.x) || !fin(pos.y) || !fin(pos.z)) return bus;
+    if (!fin(ref) || ref <= 0) ref = 4;
     const p = this.ctx.createPanner();
     p.panningModel = 'equalpower';
     p.distanceModel = 'inverse';
@@ -222,12 +344,16 @@ export class AudioEngine {
 
   tone(dest, t, { freq = 440, type = 'sine', a = 0.01, d = 0.3, s = 0, gain = 0.3, glide = null, glideT = null, vib = 0, vibRate = 6, lp = null }) {
     const ctx = this.ctx;
+    if (!fin(freq) || !fin(gain) || !fin(a) || !fin(d) || !fin(s) || !fin(t) || gain <= 0) return null;
+    if ((glide !== null && !fin(glide)) || (glideT !== null && !fin(glideT)) || !fin(vib) || (lp !== null && !fin(lp))) return null;
+    freq = clamp(freq, 15, 18000);
+    if (!this.voice(t + a + s + d)) return null;
     const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t);
     if (glide) o.frequency.exponentialRampToValueAtTime(Math.max(20, glide), t + (glideT ?? a + s + d));
     if (vib) { const l = ctx.createOscillator(); l.frequency.value = vibRate; const lg = ctx.createGain(); lg.gain.value = freq * vib; l.connect(lg).connect(o.frequency); l.start(t); l.stop(t + a + s + d + 0.05); }
     const g = ctx.createGain();
     let node = o;
-    if (lp) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = lp; node.connect(f); node = f; }
+    if (lp) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = clamp(lp, 20, ctx.sampleRate * 0.45); node.connect(f); node = f; }
     node.connect(g).connect(dest);
     this.envelope(g, t, a, gain, d, s);
     o.start(t); o.stop(t + a + s + d + 0.05);
@@ -236,6 +362,12 @@ export class AudioEngine {
 
   noise(dest, t, { buf = this.white, type = 'bandpass', freq = 1000, Q = 1, a = 0.005, d = 0.1, s = 0, gain = 0.3, sweep = null, am = 0 }) {
     const ctx = this.ctx;
+    if (!fin(freq) || !fin(gain) || !fin(a) || !fin(d) || !fin(s) || !fin(Q) || !fin(t) || gain <= 0 || (sweep !== null && !fin(sweep)) || !fin(am)) return;
+    // filters are kept well inside their stable range
+    const ny = ctx.sampleRate * 0.45;
+    freq = clamp(freq, 20, ny); Q = clamp(Q, 0.05, 30);
+    if (sweep !== null) sweep = clamp(sweep, 20, ny);
+    if (!this.voice(t + a + s + d)) return;
     const src = ctx.createBufferSource(); src.buffer = buf;
     const f = ctx.createBiquadFilter(); f.type = type; f.frequency.setValueAtTime(freq, t); f.Q.value = Q;
     if (sweep) f.frequency.exponentialRampToValueAtTime(sweep, t + a + s + d);
@@ -254,8 +386,14 @@ export class AudioEngine {
 
   // ------------------------------------------------------------------ creature calls
   creatureCall(sp, pos, kind = 'idle', scale = 1) {
-    if (!this.ready) return;
+    if (!this.ready || !sp || !sp.call) return;
+    this.lowPri = kind === 'idle' || kind === 'court';
+    try { this.callVoice(sp, pos, kind, scale); } finally { this.lowPri = false; }
+  }
+
+  callVoice(sp, pos, kind, scale) {
     const c = sp.call, t = this.ctx.currentTime + 0.02;
+    if (!fin(c.pitch) || !fin(c.length)) return;
     const size = sp.size ?? 1;
     const out = this.out(pos, this.sfx, 3 + size * 4);
     const p = c.pitch * (kind === 'alarm' ? 1.25 : kind === 'threat' || kind === 'hunt' ? 0.8 : 1) / Math.sqrt(Math.max(0.5, scale));
@@ -329,6 +467,23 @@ export class AudioEngine {
       case 'chime':
         for (let i = 0; i < n; i++) for (const [m, gg] of [[1, 1], [2.76, 0.5], [5.4, 0.25]]) this.tone(out, t + i * 0.28, { freq: p * m, a: 0.003, d: 1.4, gain: vol * 0.3 * gg });
         break;
+      case 'peep':
+        // little rising peeps (tree frogs)
+        for (let i = 0; i < n + 1; i++) this.tone(out, t + i * (0.16 + L * 0.2), { freq: p * 1.6, a: 0.01, d: 0.09, gain: vol * 0.4, glide: p * 2.1, glideT: 0.07 });
+        break;
+      case 'burble':
+        // a wet, bubbling warble
+        this.tone(out, t, { freq: p * 0.5, type: 'triangle', a: 0.03, s: L * 0.8, d: 0.15, gain: vol * 0.45, vib: 0.25, vibRate: 13 + c.rhythm * 2, lp: 1400 });
+        this.noise(out, t, { freq: p * 1.2, Q: 4, a: 0.03, s: L * 0.8, d: 0.12, gain: vol * 0.18, am: 17 });
+        break;
+      case 'hum':
+        // a soft, slowly swelling drone with a shimmer
+        this.tone(out, t, { freq: p * 0.4, a: L * 0.5, s: L, d: 0.6, gain: vol * 0.5, vib: 0.02, vibRate: 4 });
+        this.tone(out, t, { freq: p * 0.8 * 1.005, a: L * 0.5, s: L, d: 0.6, gain: vol * 0.18 });
+        break;
+      case 'coo':
+        for (let i = 0; i < Math.min(3, n); i++) this.tone(out, t + i * (0.42 + L * 0.3), { freq: p * 0.6, a: 0.06, s: L * 0.3, d: 0.22, gain: vol * 0.5, glide: p * 0.5, lp: 1200 });
+        break;
       default:
         this.tone(out, t, { freq: p, d: L, gain: vol * 0.4 });
     }
@@ -396,6 +551,80 @@ export class AudioEngine {
         break;
       case 'ability': this.tone(o, t, { freq: 300, a: 0.05, d: 0.8, gain: 0.15, glide: 1200 }); this.noise(o, t, { type: 'highpass', freq: 2000, a: 0.05, d: 0.6, gain: 0.08 }); break;
       case 'lamp': this.tone(this.uiBus, t, { freq: 1400, type: 'square', d: 0.03, gain: 0.03, lp: 3000 }); break;
+      // ---- combat
+      case 'swing': this.noise(o, t, { type: 'bandpass', freq: 1800, Q: 0.9, a: 0.03, d: 0.16, gain: 0.32, sweep: 600 }); break;
+      case 'swing-heavy':
+        this.noise(o, t, { type: 'bandpass', freq: 900, Q: 0.7, a: 0.06, d: 0.28, gain: 0.42, sweep: 260 });
+        this.tone(o, t, { freq: 120, a: 0.05, d: 0.22, gain: 0.12, glide: 70 });
+        break;
+      case 'hit':
+        this.noise(o, t, { type: 'lowpass', freq: 1300, a: 0.002, d: 0.12, gain: 0.55 });
+        this.tone(o, t, { freq: 150, a: 0.002, d: 0.14, gain: 0.35, glide: 70 });
+        break;
+      case 'hit-heavy':
+        this.noise(o, t, { buf: this.brown, type: 'lowpass', freq: 700, a: 0.003, d: 0.3, gain: 0.8 });
+        this.tone(o, t, { freq: 90, a: 0.003, d: 0.35, gain: 0.5, glide: 45 });
+        break;
+      case 'kill':
+        this.tone(o, t, { freq: 220, a: 0.003, d: 0.45, gain: 0.3, glide: 60 });
+        this.noise(o, t, { type: 'lowpass', freq: 900, a: 0.01, d: 0.5, gain: 0.4, sweep: 200 });
+        break;
+      case 'bolt':
+        this.tone(o, t, { freq: 900, type: 'square', a: 0.002, d: 0.08, gain: 0.08, lp: 3000, glide: 300 });
+        this.noise(o, t, { type: 'highpass', freq: 2500, a: 0.002, d: 0.18, gain: 0.22, sweep: 7000 });
+        break;
+      case 'shard': for (let i = 0; i < 3; i++) this.noise(o, t + i * 0.015, { freq: 3000 + i * 900, Q: 3, a: 0.002, d: 0.12, gain: 0.18 }); break;
+      case 'impact': this.noise(o, t, { freq: 1400, Q: 1.2, a: 0.002, d: 0.09, gain: 0.25 }); break;
+      case 'overheat':
+        this.noise(o, t, { type: 'highpass', freq: 3000, a: 0.01, s: 0.3, d: 0.6, gain: 0.18 });
+        this.tone(o, t, { freq: 1200, type: 'triangle', a: 0.01, d: 0.4, gain: 0.08, glide: 600 });
+        break;
+      case 'shield-hit': this.tone(o, t, { freq: 640, type: 'triangle', a: 0.002, d: 0.3, gain: 0.14 }); this.tone(o, t, { freq: 1730, a: 0.002, d: 0.2, gain: 0.06 }); break;
+      case 'shield-break': for (let i = 0; i < 6; i++) this.tone(o, t + i * 0.03, { freq: 1500 + Math.random() * 1800, a: 0.002, d: 0.3, gain: 0.07 }); break;
+      case 'orb':
+        this.noise(o, t, { buf: this.pink, type: 'lowpass', freq: 1800, a: 0.005, d: 0.4, gain: 0.45, sweep: 300 });
+        this.tone(o, t, { freq: 330, a: 0.005, d: 0.4, gain: 0.15, glide: 120 });
+        break;
+      case 'bite':
+        this.noise(o, t, { freq: 2200, Q: 1.5, a: 0.002, d: 0.06, gain: 0.35 });
+        this.noise(o, t + 0.05, { type: 'lowpass', freq: 800, a: 0.002, d: 0.1, gain: 0.3 });
+        break;
+      case 'wield': this.tone(this.uiBus, t, { freq: 520, type: 'triangle', a: 0.003, d: 0.12, gain: 0.06 }); this.noise(this.uiBus, t, { type: 'highpass', freq: 4000, a: 0.005, d: 0.2, gain: 0.05 }); break;
+      case 'ab-gamma':
+        this.tone(o, t, { freq: 110, type: 'sawtooth', a: 0.05, s: 2.6, d: 0.4, gain: 0.1, lp: 1600, vib: 0.02, vibRate: 31 });
+        this.tone(o, t, { freq: 880, a: 0.05, s: 2.6, d: 0.4, gain: 0.05, vib: 0.01, vibRate: 7 });
+        this.noise(o, t, { type: 'highpass', freq: 3500, a: 0.05, s: 2.6, d: 0.4, gain: 0.08 });
+        break;
+      case 'ab-shockwave':
+        this.tone(o, t, { freq: 70, a: 0.005, d: 0.8, gain: 0.6, glide: 35 });
+        this.noise(o, t, { buf: this.brown, type: 'lowpass', freq: 600, a: 0.005, d: 0.7, gain: 0.7, sweep: 120 });
+        break;
+      case 'ab-thornburst': for (let i = 0; i < 8; i++) { this.noise(o, t + i * 0.04, { freq: 2500 + Math.random() * 2000, Q: 4, a: 0.002, d: 0.15, gain: 0.16 }); this.tone(o, t + i * 0.04, { freq: 1800 + i * 160, a: 0.002, d: 0.3, gain: 0.03 }); } break;
+      case 'ab-stasis':
+        this.tone(o, t, { freq: 1900, a: 0.01, d: 1.4, gain: 0.08, glide: 900 });
+        this.noise(o, t, { type: 'highpass', freq: 5000, a: 0.01, d: 1.0, gain: 0.08 });
+        break;
+      case 'ab-aegis': [392, 587.33, 783.99].forEach((f, i) => this.tone(o, t + i * 0.05, { freq: f, a: 0.02, d: 1.2, gain: 0.08 })); break;
+      case 'ab-phase': this.noise(o, t, { type: 'bandpass', freq: 600, Q: 0.6, a: 0.01, d: 0.4, gain: 0.3, sweep: 4000 }); break;
+      case 'ab-mend': [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => this.tone(o, t + i * 0.12, { freq: f, type: 'triangle', a: 0.05, d: 1.5, gain: 0.05 })); break;
+      case 'ab-repel': this.tone(o, t, { freq: 55, a: 0.2, d: 1.8, gain: 0.45, vib: 0.06, vibRate: 5 }); this.tone(o, t, { freq: 58.3, a: 0.2, d: 1.8, gain: 0.3 }); break;
+      // ---- the warden
+      case 'boss-roar':
+        this.tone(o, t, { freq: 75, type: 'sawtooth', a: 0.15, s: 1.2, d: 0.9, gain: 0.5, lp: 600, vib: 0.1, vibRate: 19, glide: 55 });
+        this.noise(o, t, { buf: this.brown, type: 'lowpass', freq: 500, a: 0.15, s: 1.2, d: 0.8, gain: 0.6, am: 23 });
+        this.tone(o, t, { freq: 310, type: 'sawtooth', a: 0.2, s: 0.8, d: 0.6, gain: 0.08, lp: 1400, glide: 220 });
+        break;
+      case 'boss-slam':
+        this.tone(o, t, { freq: 48, a: 0.004, d: 1.2, gain: 0.8, glide: 28 });
+        this.noise(o, t, { buf: this.brown, type: 'lowpass', freq: 400, a: 0.004, d: 1.0, gain: 0.8 });
+        this.noise(o, t + 0.05, { buf: this.white, type: 'bandpass', freq: 900, Q: 0.6, a: 0.02, d: 0.9, gain: 0.3, sweep: 300 });
+        break;
+      case 'boss-volley': this.tone(o, t, { freq: 180, a: 0.05, d: 0.5, gain: 0.25, glide: 520 }); this.noise(o, t, { type: 'bandpass', freq: 1200, Q: 2, a: 0.05, d: 0.4, gain: 0.15, sweep: 3000 }); break;
+      case 'boss-fall':
+        this.tone(o, t, { freq: 60, type: 'sawtooth', a: 0.2, s: 1.5, d: 3, gain: 0.4, lp: 500, glide: 30 });
+        this.noise(o, t + 1.2, { buf: this.brown, type: 'lowpass', freq: 300, a: 0.02, d: 2.5, gain: 0.9 });
+        for (const [m, g] of [[1, 0.1], [2.01, 0.05], [3.02, 0.03]]) this.tone(this.uiBus, t + 2.4, { freq: 392 * m, a: 0.01, d: 5, gain: g });
+        break;
       case 'click': this.tone(this.uiBus, t, { freq: 900, type: 'triangle', d: 0.05, gain: 0.05 }); break;
       case 'tick': this.tone(this.uiBus, t, { freq: 1500, type: 'triangle', d: 0.025, gain: 0.025 }); break;
       case 'open': this.noise(this.uiBus, t, { freq: 1800, Q: 0.5, a: 0.02, d: 0.25, gain: 0.05, sweep: 600 }); break;
@@ -411,13 +640,19 @@ export class AudioEngine {
    */
   update(dt, e, camera) {
     if (!this.ready) return;
+    this.lastUpdate = performance.now();
+    if (!this.firstUpdate) this.firstUpdate = this.lastUpdate;
     // bad input (a NaN from anywhere) must not reach the audio graph
-    for (const k of ['enclosed', 'altitude', 'water', 'river', 'fall', 'city', 'chasm']) if (!Number.isFinite(e[k])) e[k] = 0;
+    for (const k of ['enclosed', 'altitude', 'water', 'river', 'fall', 'city', 'chasm', 'beam', 'boss']) if (!fin(e[k])) e[k] = 0;
+    if (!fin(e.layer)) e.layer = 0;
     const ctx = this.ctx, t = ctx.currentTime;
     // listener
     const L = ctx.listener;
     const p = camera.position;
     const f = camera.getWorldDirection(this._fwd || (this._fwd = p.clone()));
+    // never straight up or down: a forward parallel to "up" has no defined right
+    if (Math.abs(f.y) > 0.97) { const h = Math.hypot(f.x, f.z) || 1; const k = Math.sqrt(1 - 0.97 * 0.97); f.set(f.x / h * k, Math.sign(f.y) * 0.97, f.z / h * k); if (!fin(f.x)) f.set(0, Math.sign(f.y) * 0.97, -k); }
+    if (!fin(p.x) || !fin(p.y) || !fin(p.z) || !fin(f.x) || !fin(f.y) || !fin(f.z)) return;
     if (L.positionX) {
       L.positionX.setTargetAtTime(p.x, t, 0.02); L.positionY.setTargetAtTime(p.y, t, 0.02); L.positionZ.setTargetAtTime(p.z, t, 0.02);
       L.forwardX.setTargetAtTime(f.x, t, 0.02); L.forwardY.setTargetAtTime(f.y, t, 0.02); L.forwardZ.setTargetAtTime(f.z, t, 0.02);
@@ -441,7 +676,8 @@ export class AudioEngine {
     B.fall.f.frequency.setTargetAtTime(400 + e.fall * 500, t, 0.6);
     B.howl.g.gain.setTargetAtTime(chasm * 0.025 * (0.6 + 0.4 * Math.sin(t * 0.09)), t, 1.2);
     B.howl.f.frequency.setTargetAtTime(170 + 60 * Math.sin(t * 0.05) + wind * 80, t, 1.5);
-    B.cave.g.gain.setTargetAtTime(e.enclosed * 0.08 + (layer === 3 ? 0.03 : layer >= 4 ? 0.02 : 0), t, 0.8);
+    // a quiet room tone everywhere: the world is never dead silent
+    B.cave.g.gain.setTargetAtTime(0.008 + e.enclosed * 0.08 + (layer === 3 ? 0.03 : layer >= 4 ? 0.02 : 0), t, 0.8);
     B.hum.g.gain.setTargetAtTime((layer >= 2 ? 0.01 : 0) + (layer === 3 ? 0.012 : 0) + e.enclosed * 0.006, t, 1.0);
     B.shimmer.g.gain.setTargetAtTime(layer >= 4 ? 0.018 * (1 - e.enclosed * 0.5) : 0, t, 2);
     // reverb character: tight in caves, vast in the chasm and the lower layers' open halls
@@ -456,6 +692,23 @@ export class AudioEngine {
     // grapple winch
     this.motor.g.gain.setTargetAtTime(e.reeling ? 0.05 : e.paying ? 0.025 : 0, t, 0.05);
     this.motor.o.frequency.setTargetAtTime(e.reeling ? 95 : 60, t, 0.1);
+    // the gamma ray
+    const bh = this.beamHum;
+    bh.g.gain.setTargetAtTime(e.beam ? 0.045 : 0, t, e.beam ? 0.03 : 0.12);
+    if (e.beam) bh.f.frequency.setTargetAtTime(700 + Math.random() * 900, t, 0.02);
+    this.bossOn = e.boss > 0;
+    // a fight with the warden has a heartbeat of drums under the music
+    if (this.bossOn) {
+      this.drumT = (this.drumT ?? 0) - dt;
+      if (this.drumT <= 0) {
+        this.drumT = 0.74;
+        this.drumN = ((this.drumN || 0) + 1) % 8;
+        const accent = this.drumN % 4 === 0;
+        this.tone(this.music, t, { freq: accent ? 62 : 55, a: 0.004, d: accent ? 0.7 : 0.4, gain: accent ? 0.5 : 0.3, glide: 38 });
+        this.noise(this.music, t, { buf: this.brown, type: 'lowpass', freq: 260, a: 0.004, d: 0.25, gain: accent ? 0.35 : 0.2 });
+        if (this.drumN === 6) this.noise(this.music, t + 0.37, { type: 'bandpass', freq: 1800, Q: 1, a: 0.002, d: 0.08, gain: 0.12 });
+      }
+    }
     // occasional ambient events
     this.eventTimer -= dt;
     if (this.eventTimer <= 0) {
@@ -496,7 +749,7 @@ export class AudioEngine {
       for (let i = 0, n = 3 + Math.floor(Math.random() * 4); i < n; i++) this.noise(o, t + i * 0.16, { type: 'lowpass', freq: 600, a: 0.02, d: 0.08, gain: 0.08 });
     }
     if (layer >= 4 && Math.random() < 0.5) {
-      // glassy chimes of the Lantern Sea and the slow lap of dark water
+      // glassy chimes in the goblet cavern and the slow lap of its lakes
       const o = this.out(around(20 + Math.random() * 60, Math.random() * 20), this.amb, 12);
       const f = [987.77, 1174.66, 1318.51, 1567.98, 1975.53][Math.floor(Math.random() * 5)];
       for (const [m, g] of [[1, 0.035], [2.01, 0.012], [3.03, 0.006]]) this.tone(o, t, { freq: f * m, a: 0.004, d: 2.6, gain: g });
@@ -544,9 +797,9 @@ export class AudioEngine {
       this.phraseEnd = t + 60 + Math.random() * 50;
     }
     if (t > this.phraseEnd) {
-      // a stretch of silence between phrases
+      // a short breath between phrases (long silences sounded like the sound had died)
       this.resting = true;
-      this.nextChord = t + 25 + Math.random() * 35;
+      this.nextChord = t + 8 + Math.random() * 10;
       return;
     }
     const M = LAYER_MUSIC[layer];

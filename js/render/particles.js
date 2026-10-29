@@ -24,6 +24,8 @@ const PRESETS = {
   faultDeep: { motes: [0.42, [0.85, 0.9, 0.92], [0.75, 0.82, 0.88], 0.06, 0.05, 0.3], glows: [0, [1, 1, 1], [1, 1, 1], 0.08, 0, 0] },
   faultCave: { motes: [0.38, [0.8, 0.78, 0.74], [0.68, 0.66, 0.64], 0.05, -0.02, 0.1], glows: [0, [1, 1, 1], [1, 1, 1], 0.07, 0, 0] },
   lantern: { motes: [0.35, [0.55, 0.7, 0.75], [0.45, 0.55, 0.65], 0.06, 0.02, 0.3], glows: [0.65, [0.35, 0.85, 1.0], [0.6, 1.0, 0.85], 0.1, 0.05, 0.9] },
+  // Layer 4: a fine drizzle from the cavern roof and drifting glowing spores
+  goblets: { motes: [0.85, [0.72, 0.84, 0.95], [0.6, 0.75, 0.9], 0.045, -1.6, 0.05], glows: [0.55, [0.3, 0.9, 1.0], [0.55, 1.0, 0.9], 0.11, 0.04, 0.85] },
 };
 
 function makeField(n, additive, seed) {
@@ -163,7 +165,7 @@ export class Particles {
 
   pickPreset(ctx) {
     const { layer, enclosed, night, zone } = ctx;
-    if (layer >= 4) return 'lantern';
+    if (layer >= 4) return ctx.y < -1998 ? 'goblets' : 'lantern';
     if (layer === 3) return enclosed > 0.5 ? 'faultCave' : ctx.y > -1250 ? 'fault' : ctx.y > -1640 ? 'faultMid' : 'faultDeep';
     if (layer === 2) return ctx.y < this.plan.params.plainY + 60 ? 'plain' : enclosed > 0.5 ? 'forest' : 'forest';
     if (enclosed > 0.5) return 'cave';

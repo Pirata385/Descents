@@ -6,6 +6,7 @@ import { ColumnGen, ColumnData } from '../js/world/column.js';
 import { LAYERS } from '../js/world/layers.js';
 import { ArtifactSystem } from '../js/artifacts/artifacts.js';
 import { buildArtifactModel } from '../js/artifacts/artifactMesh.js';
+import { WEAPONS, ABILITIES, ELEMENTS, describeWeapon } from '../js/artifacts/artifactGen.js';
 
 export async function artifactTests(seeds, plans) {
   for (const seed of seeds) {
@@ -73,5 +74,48 @@ export async function artifactTests(seeds, plans) {
     sys.equipped = [];
     sys.recompute();
     assert(game.player.mods.run === 1 && game.grapple.rangeBonus === 0, 'unequipping did not restore the explorer');
+  });
+
+  await test('weapons, combat abilities and the combat effects vary and reach the explorer', () => {
+    const all = seeds.flatMap((s) => plans.get(s).artifacts);
+    const weapons = all.filter((a) => a.weapon);
+    const types = new Set(weapons.map((a) => a.weapon.type));
+    const elements = new Set(weapons.map((a) => a.weapon.element).filter(Boolean));
+    const abil = new Set(all.filter((a) => a.ability).map((a) => a.ability.type));
+    const combat = [...abil].filter((k) => ABILITIES[k].kind);
+    const arche = new Set(all.map((a) => a.archetype));
+    for (const a of weapons) {
+      assert(WEAPONS[a.weapon.type], `unknown weapon ${a.weapon.type}`);
+      assert(a.weapon.power >= 1 && a.weapon.power < 3, `weapon power out of range (${a.weapon.power})`);
+      assert(!a.weapon.element || ELEMENTS[a.weapon.element], 'unknown element');
+      assert(describeWeapon(a.weapon).length > 10, 'weapon without a description');
+    }
+    note(`${weapons.length} weapons of ${types.size} kinds (${[...types].join(', ')}) · elements ${[...elements].join(', ')} · ${combat.length} combat abilities (${combat.join(', ')}) · ${arche.size} shapes`);
+    assert(types.size >= 5, 'too few kinds of weapon');
+    assert(combat.length >= 5, 'too few combat abilities');
+    assert(arche.size >= 40, 'too few artifact shapes');
+    // the warden's reward
+    for (const seed of seeds) {
+      const t = plans.get(seed).artifacts.find((a) => a.site.kind === 'throne');
+      assert(t && t.weapon && t.weapon.type === 'gamma' && t.grade === 4 && t.ability && t.ability.type === 'gamma', `[${seed}] the Throne Cup must hold a gamma lance`);
+    }
+    // combat effects on the explorer
+    const plan = plans.get(seeds[0]);
+    const game = { plan, renderer: { scene: new THREE.Scene() }, player: { mods: {}, pos: new THREE.Vector3(), health: 100, maxHealth: 100, stamina: 100, maxStamina: 100 }, grapple: { rangeBonus: 0, reelMul: 1 } };
+    const sys = new ArtifactSystem(game);
+    const fake = { id: 9999, name: 'test', effects: [{ type: 'armor', magnitude: 0.3 }, { type: 'tough', magnitude: 40 }, { type: 'wind', magnitude: 20 }, { type: 'might', magnitude: 0.5 }], ability: null, drawback: null, weapon: { type: 'blade', power: 1.2, element: 'frost' }, site: plan.artifacts[0].site };
+    sys.byId.set(fake.id, fake);
+    sys.collected.add(fake.id);
+    assert(sys.wield(fake.id), 'could not wield a weapon');
+    assert(sys.wieldedArt() === fake, 'the weapon is not in hand');
+    assert(Math.abs(sys.mods.armor - 0.3) < 1e-6 && sys.mods.might === 0.5, 'the weapon in hand does not work on its bearer');
+    assert(game.player.maxHealth === 140 && game.player.maxStamina === 120, 'toughness and second wind do not raise health and stamina');
+    sys.wield(null);
+    assert(game.player.maxHealth === 100 && !sys.mods.armor, 'putting the weapon away did not restore the explorer');
+    const real = plan.artifacts.find((x) => x.weapon);
+    sys.collected.add(real.id);
+    assert(sys.weapons().length >= 2 && sys.weapons()[0] === null && sys.weapons().includes(real.id), 'the carried weapons list');
+    sys.cycleWeapon();
+    assert(sys.wielded === real.id, 'switching weapons');
   });
 }

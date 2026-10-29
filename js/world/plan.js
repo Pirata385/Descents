@@ -11,6 +11,7 @@ import { buildCoarseGrid, computeHydrology, buildRivers } from './hydrology.js';
 import { generateCaves, cavesToCapsules } from './caves.js';
 import { planSpiral, planGalleryWindows, planRibs, planLongStair, planDeepTunnels } from './abyss.js';
 import { planFaultCaves, findChasmSites } from './faultcaves.js';
+import { planLayer4 } from './goblets.js';
 import { generateCity } from './city.js';
 import { generateL1Features, generateL2Features } from './ruins.js';
 import { ColumnGen, ColumnData } from './column.js';
@@ -180,7 +181,11 @@ export function generatePlan(seedInput, progress = () => {}) {
   });
   for (const c of faultNet.caves) { c.id = caves.length; caves.push(c); }
   plan.capsules = cavesToCapsules(caves);
-  plan.prims = faultNet.prims.slice();
+  // Layer 4: the cavern of the goblets beyond the Gate Stair
+  progress('Raising the goblets of the deep', 0.44);
+  const layer4 = faultNet.gateStair ? planLayer4(params.seed, faultNet.gateStair, names) : null;
+  plan.layer4 = layer4;
+  plan.prims = [...faultNet.prims, ...(layer4 ? layer4.prims : [])];
   tempGen = new ColumnGen(plan);
   mark('fault');
 
@@ -286,7 +291,8 @@ export function generatePlan(seedInput, progress = () => {}) {
   mark('pools');
 
   // ---- extra structures: Lip Station camp, the sinkholes and the Fourth Gate
-  const extraPrims = [...faultNet.prims];
+  const extraPrims = [...faultNet.prims, ...(layer4 ? layer4.prims : [])];
+  if (layer4) for (const f of layer4.falls) waterfalls.push({ ...f, name: `${names.name('falls4', waterfalls.length)} Falls` });
   const landmarks = [...city.landmarks, ...l1.landmarks, ...l2.landmarks];
   const th0 = spiral.th0;
   const dirS = spiral.dir;
@@ -319,6 +325,7 @@ export function generatePlan(seedInput, progress = () => {}) {
 
   progress('Charting routes', 0.55);
   landmarks.push(...faultNet.landmarks);
+  if (layer4) landmarks.push(...layer4.landmarks);
   landmarks.push({ type: 'fault', name: 'The Great Fault', x: params.fault.x, z: params.fault.z, y: params.plainY, layer: 2 });
   landmarks.push({ type: 'plain', name: `Stone Plain of ${names.name('plain')}`, x: lastStair[0], z: lastStair[1], y: lastStair[2], layer: 2 });
   landmarks.push({ type: 'stair', name: 'The Long Stair', x: lastStair[0], z: lastStair[1], y: (longStair.yTop + longStair.yBottom) / 2, layer: 2 });
@@ -787,6 +794,7 @@ export function generatePlan(seedInput, progress = () => {}) {
   for (const sp of l1.spires) sites.push({ x: sp.x, z: sp.z, y: floorNear(sp.x, sp.z, sp.y + 1), layer: 1, context: 'atop a sheer rock spire', place: 'a rock spire near the Eye', kind: 'spire' });
   for (const cr of l2.crystals) sites.push({ x: cr.x + 2.5, z: cr.z, y: floorNear(cr.x + 2.5, cr.z, cr.y + 1), layer: 2, context: 'among glowing crystal growths', place: 'a crystal geode', kind: 'crystal' });
   for (const st of faultNet.sites) sites.push({ ...st, y: floorNear(st.x, st.z, st.y + 0.5) });
+  if (layer4) for (const st of layer4.sites) sites.push({ ...st, y: floorNear(st.x, st.z, st.y + 0.5) });
   for (const wf of waterfalls.filter((w) => w.kind === 'eye').slice(0, 3)) {
     const p = pools.find((pp) => Math.hypot(pp.x - wf.x, pp.z - wf.z) < 30 && pp.kind === 'plunge');
     if (p && Number.isFinite(p.level)) sites.push({ x: p.x + p.r + 2, z: p.z, y: floorNear(p.x + p.r + 2, p.z, p.level + 1), layer: 2, context: 'in the spray of a great waterfall', place: wf.name, kind: 'falls' });

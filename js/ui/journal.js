@@ -4,7 +4,7 @@ import { TopDownMap, VerticalMap } from './maps.js';
 import { Preview } from './preview.js';
 import { FAMILY_LABEL, describeAppearance, DIET_TEXT, LOCO_TEXT, NICHE_LABEL, G } from '../creatures/genome.js';
 import { typicalPhenotype } from '../creatures/anatomy.js';
-import { CATEGORY_LABEL, GRADES, describeEffect, describeAbility, describeDrawback } from '../artifacts/artifactGen.js';
+import { CATEGORY_LABEL, GRADES, describeEffect, describeAbility, describeDrawback, describeWeapon } from '../artifacts/artifactGen.js';
 import { LAYERS } from '../world/layers.js';
 import { FACT_TIMES, FULL_OBSERVATION } from '../systems/discovery.js';
 import { SLOTS } from '../artifacts/artifacts.js';
@@ -172,7 +172,7 @@ export class Journal {
       <div class="catalog">
         <div class="cat-list">
           <div class="cat-count">${items.length} artifacts recovered</div>
-          ${items.map((a) => `<button class="cat-item ${a.id === this.selArtifact ? 'active' : ''}" data-art="${a.id}"><span class="grade g${a.grade}">${['IV', 'III', 'II', 'I', '✶'][a.grade]}</span><span class="nm">${esc(a.name)}</span>${A.equipped.includes(a.id) ? '<span class="pct">worn</span>' : ''}</button>`).join('') || `<div class="muted pad">No artifacts recovered yet. They lie in ruins, caves, atop spires and in other hard-to-reach places. ${this.game.touch ? 'Tap <b>Take</b>' : 'Press <b>E</b>'} to take one.</div>`}
+          ${items.map((a) => `<button class="cat-item ${a.id === this.selArtifact ? 'active' : ''}" data-art="${a.id}"><span class="grade g${a.grade}">${['IV', 'III', 'II', 'I', '✶'][a.grade]}</span><span class="nm">${esc(a.name)}</span>${A.wielded === a.id ? '<span class="pct">in hand</span>' : A.equipped.includes(a.id) ? '<span class="pct">worn</span>' : ''}</button>`).join('') || `<div class="muted pad">No artifacts recovered yet. They lie in ruins, caves, atop spires and in other hard-to-reach places. ${this.game.touch ? 'Tap <b>Take</b>' : 'Press <b>E</b>'} to take one.</div>`}
           ${spotted.length ? `<div class="cat-group">Sighted, not taken</div>${spotted.map((a) => `<div class="cat-item ghost"><span class="grade">?</span><span class="nm">Unknown object — ${esc(a.site.place)}</span></div>`).join('')}` : ''}
         </div>
         <div class="cat-detail"></div>
@@ -190,10 +190,10 @@ export class Journal {
     const found = D.found.get(a.id);
     const layer = LAYERS[a.site.layer];
     const props = idd
-      ? `${a.effects.length ? `<ul class="facts">${a.effects.map((e) => `<li>${esc(describeEffect(e))}</li>`).join('')}</ul>` : '<p class="muted">No lasting effect on its bearer.</p>'}
+      ? `${a.weapon ? `<h4>Weapon</h4><p>${esc(describeWeapon(a.weapon))}</p>` : ''}${a.effects.length ? `<ul class="facts">${a.effects.map((e) => `<li>${esc(describeEffect(e))}</li>`).join('')}</ul>` : '<p class="muted">No lasting effect on its bearer.</p>'}
          ${a.ability ? `<h4>Ability</h4><p>${esc(describeAbility(a.ability))}</p>` : ''}
          ${a.drawback ? `<h4>Drawback</h4><p>${esc(describeDrawback(a.drawback))}</p>` : ''}`
-      : `<p class="locked">Unidentified. Carry it equipped to learn its properties (${prog}%).</p>`;
+      : `${a.weapon ? `<h4>Weapon</h4><p>${esc(describeWeapon(a.weapon))}</p>` : ''}<p class="locked">Unidentified. Carry it equipped or in hand to learn its properties (${prog}%).</p>`;
     det.innerHTML = `
       <div class="det-head">
         <div><h2>${esc(a.name)}</h2><div class="binomial">${esc(CATEGORY_LABEL[a.category])}</div></div>
@@ -206,12 +206,15 @@ export class Journal {
           <h4>Known properties</h4>${props}
           <h4>Discovered</h4><p>${esc(a.site.context)} — ${esc(a.site.place)}, ${a.site.layer === 0 ? 'on the surface' : `${esc(layer.name)}`}${found ? `, at a depth of ${Math.round(Math.max(0, -found.y))} m` : ''}.</p>
           <h4>Notes</h4><p class="muted">${esc(a.origin)}</p>
-          <div class="row">${A.equipped.includes(a.id) ? `<button class="btn" data-act="unequip">Unequip</button>` : `<button class="btn" data-act="equip" ${A.equipped.length >= SLOTS ? 'disabled' : ''}>Equip</button>`}</div>
+          <div class="row">${A.equipped.includes(a.id) ? `<button class="btn" data-act="unequip">Unequip</button>` : `<button class="btn" data-act="equip" ${A.equipped.length >= SLOTS ? 'disabled' : ''}>Equip</button>`}${a.weapon ? (A.wielded === a.id ? '<button class="btn" data-act="sheathe">Put away</button>' : '<button class="btn" data-act="wield">Wield</button>') : ''}</div>
         </div>
       </div>`;
     const eq = det.querySelector('[data-act=equip]'), un = det.querySelector('[data-act=unequip]');
     if (eq) eq.onclick = () => { A.equip(a.id); this.renderArtifacts(); };
     if (un) un.onclick = () => { A.unequip(a.id); this.renderArtifacts(); };
+    const wi = det.querySelector('[data-act=wield]'), sh = det.querySelector('[data-act=sheathe]');
+    if (wi) wi.onclick = () => { A.wield(a.id); this.renderArtifacts(); };
+    if (sh) sh.onclick = () => { A.wield(null); this.renderArtifacts(); };
     const pv = this.getPreview();
     if (pv) { pv.attach(det.querySelector('.preview-box')); pv.showArtifact(a); }
   }
@@ -221,7 +224,8 @@ export class Journal {
     const g = this.game, A = g.artifacts;
     const slots = [];
     for (let i = 0; i < SLOTS; i++) slots.push(A.equipped[i] !== undefined ? A.byId.get(A.equipped[i]) : null);
-    const carried = A.list.filter((a) => A.collected.has(a.id) && !A.equipped.includes(a.id));
+    const carried = A.list.filter((a) => A.collected.has(a.id) && !A.equipped.includes(a.id) && A.wielded !== a.id);
+    const inHand = A.wieldedArt();
     const abil = A.abilityItems();
     const mods = A.mods || {};
     const summary = [];
@@ -240,6 +244,15 @@ export class Journal {
     if (mods.swim > 1.001) summary.push(`Swimming +${Math.round((mods.swim - 1) * 100)}%`);
     if (mods.glide) summary.push('Glide (hold Space while falling)');
     if (mods.move < 0.999) summary.push(`Movement −${Math.round((1 - mods.move) * 100)}%`);
+    if (mods.armor) summary.push(`Damage taken −${Math.round(mods.armor * 100)}%`);
+    if (mods.might) summary.push(`Weapon damage +${Math.round(mods.might * 100)}%`);
+    if (mods.haste) summary.push(`Attack speed +${Math.round(mods.haste * 100)}%`);
+    if (mods.leech) summary.push(`Heals ${Math.round(mods.leech * 100)}% of damage dealt`);
+    if (mods.thorns) summary.push(`Returns ${Math.round(mods.thorns * 100)}% of bites`);
+    if (mods.tough) summary.push(`Maximum health ${100 + Math.round(mods.tough)}`);
+    if (mods.wind) summary.push(`Maximum stamina ${100 + Math.round(mods.wind)}`);
+    if (mods.calm) summary.push(`Creatures ${Math.round(mods.calm * 100)}% slower to anger`);
+    if (mods.darksight) summary.push(`Sees ${Math.round(mods.darksight * 100)}% further in the dark`);
     const card = (a, i) => a ? `
       <div class="slot full"><div class="slot-n">Slot ${i + 1}</div><div class="slot-name">${esc(a.name)}</div>
       <div class="muted">${GRADES[a.grade]} · ${CATEGORY_LABEL[a.category]}${A.isIdentified(a.id) ? '' : ' · unidentified'}</div>
@@ -248,7 +261,12 @@ export class Journal {
       <div class="equip">
         <div class="equip-left">
           <h3>Mechanical Grappling Arm</h3>
-          <p class="muted">The arm you were given by the Guild. Range ${Math.round(g.grapple.range)} m. ${g.touch ? '<b>Arm</b> fires the claw where you aim, hold <b>Reel in</b> or <b>Pay out</b> while it is attached, tap <b>Release</b> or <b>Jump</b> to let go.' : '<b>Left click</b> fires the claw, <b>right click / Q / wheel</b> reels in, <b>Z / wheel</b> pays out, <b>X</b> or click again releases.'}</p>
+          <p class="muted">The arm you were given by the Guild. Range ${Math.round(g.grapple.range)} m. ${g.touch ? '<b>Arm</b> fires the claw where you aim, hold <b>Reel in</b> or <b>Pay out</b> while it is attached, tap <b>Release</b> or <b>Jump</b> to let go.' : g.pad ? '<b>R1</b> fires the claw and lets go, <b>L2</b> reels in, <b>L1</b> pays out.' : '<b>Right click</b> (or <b>G</b>) fires the claw, <b>Q / wheel</b> reels in, <b>Z / wheel</b> pays out, <b>X</b> or right click again releases.'}</p>
+          <h3>In hand</h3>
+          <div class="slot full hand"><div class="slot-name">${esc(inHand ? inHand.name : "Delver's pick")}</div>
+            <div class="muted">${esc(describeWeapon(inHand ? inHand.weapon : { type: 'pick', power: 1, element: null }))}</div>
+            ${inHand ? '<button class="btn small" data-wield="-1">Put away</button>' : ''}</div>
+          <p class="muted">${g.touch ? 'Hold <b>Attack</b>' : g.pad ? 'Hold <b>R2</b>' : 'Hold <b>left click</b>'} to strike, shoot or pour a ray${g.touch || g.pad ? '' : ' · <b>T</b> switches weapon'}.</p>
           <h3>Worn artifacts</h3>
           <div class="slots">${slots.map(card).join('')}</div>
           <h3>Combined effects</h3>
@@ -257,11 +275,12 @@ export class Journal {
         </div>
         <div class="equip-right">
           <h3>Carried</h3>
-          ${carried.map((a) => `<div class="carry"><span class="grade g${a.grade}">${['IV', 'III', 'II', 'I', '✶'][a.grade]}</span><span class="nm">${esc(a.name)}</span><button class="btn small" data-eq="${a.id}" ${A.equipped.length >= SLOTS ? 'disabled' : ''}>Equip</button></div>`).join('') || '<p class="muted">Nothing else carried.</p>'}
+          ${carried.map((a) => `<div class="carry"><span class="grade g${a.grade}">${['IV', 'III', 'II', 'I', '✶'][a.grade]}</span><span class="nm">${esc(a.name)}</span>${a.weapon ? `<button class="btn small" data-wield="${a.id}">Wield</button>` : ''}<button class="btn small" data-eq="${a.id}" ${A.equipped.length >= SLOTS ? 'disabled' : ''}>Equip</button></div>`).join('') || '<p class="muted">Nothing else carried.</p>'}
         </div>
       </div>`;
     this.body.querySelectorAll('[data-un]').forEach((b) => { b.onclick = () => { A.unequip(Number(b.dataset.un)); this.renderEquipment(); }; });
     this.body.querySelectorAll('[data-eq]').forEach((b) => { b.onclick = () => { A.equip(Number(b.dataset.eq)); this.renderEquipment(); }; });
+    this.body.querySelectorAll('[data-wield]').forEach((b) => { b.onclick = () => { const id = Number(b.dataset.wield); A.wield(id < 0 ? null : id); this.renderEquipment(); }; });
     this.body.querySelectorAll('[data-ab]').forEach((b) => { b.onclick = () => { A.activeIndex = Number(b.dataset.ab); this.renderEquipment(); }; });
   }
 

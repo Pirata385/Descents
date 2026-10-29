@@ -5,16 +5,18 @@
 // - ceiling: the underside of gallery ceilings (upside down)
 // - cave: the Layer 3 cave network, walked as a graph of passage nodes
 // - wall: the walls of the Great Fault, as (angle, height) coordinates on the rock face
-// - air: open air (the chasm, the shaft of the Eye, the sky over the bowl and city)
+// - air: open air (the chasm, the shaft of the Eye, the sky over the bowl and city,
+//   the cavern of the goblets in Layer 4)
 import * as THREE from 'three';
 import { Z_BOWL, Z_CITY, Z_COUNTRY, Z_EYE } from '../world/field.js';
 import { CF } from '../world/column.js';
 import { M, isGrassy } from '../world/materials.js';
+import { SPLIT_Y } from '../world/goblets.js';
 
-export const BAND = { SURF: 0, G0: 1, G1: 2, G2: 3, PLAIN: 4, SHAFT: 5, CAVE3: 6, CHASM: 7, BASIN: 8 };
+export const BAND = { SURF: 0, G0: 1, G1: 2, G2: 3, PLAIN: 4, SHAFT: 5, CAVE3: 6, CHASM: 7, BASIN: 8, GOBLETS: 9 };
 
 const MINERAL = new Set([M.ROCK, M.GRAVEL, M.STONEPLAIN, M.CRYSTAL, M.DARKROCK, M.SHAFTROCK, M.BASALT, M.RUIN, M.RUIN2, M.FAULTROCK, M.DEEPSTONE]);
-const LICHEN = new Set([M.LICHEN, M.FUNGUS, M.MOSS]);
+const LICHEN = new Set([M.LICHEN, M.FUNGUS, M.MOSS, M.GOBMOSS]);
 
 /** Cave graph of the Layer 3 network: passage nodes joined by links and at shared halls. */
 export class CaveGraph {
@@ -78,6 +80,7 @@ export class Habitats {
     this.chasm = game.world.gen.chasm;
     this.caves = new CaveGraph(game.plan);
     this.fault = game.plan.fault || {};
+    this.l4 = game.plan.layer4 || null;
     this._P = {};
   }
 
@@ -85,6 +88,7 @@ export class Habitats {
   bandAt(x, y, z) {
     const p = this.p;
     if (y > -350) return BAND.SURF;
+    if (y < SPLIT_Y && this.l4) return BAND.GOBLETS;
     if (y < p.chasm.floorY + 25) return BAND.BASIN;
     if (y < p.plainY - 8) {
       // inside the chasm or the rock around it
@@ -110,6 +114,7 @@ export class Habitats {
         return [BAND.G0, BAND.G1, BAND.G2, BAND.PLAIN];
       }
       case 'layer3': return h === 'cave' ? [BAND.CAVE3] : [BAND.CHASM, BAND.BASIN];
+      case 'layer4': return [BAND.GOBLETS];
       default: return [];
     }
   }
@@ -117,7 +122,7 @@ export class Habitats {
   /** Food at a ground position for a diet. */
   foodAt(sp, mat) {
     const d = sp.behavior.diet;
-    if (d === 'grazer' || d === 'browser') return isGrassy(mat);
+    if (d === 'grazer' || d === 'browser') return isGrassy(mat) || mat === M.GOBMOSS;
     if (d === 'lithophage') return MINERAL.has(mat);
     if (d === 'lichen') return LICHEN.has(mat);
     return true;
@@ -165,10 +170,11 @@ export class Habitats {
     }
     if (h === 'wall') {
       const y = Math.min(p.chasm.yWide - 5, Math.max(p.chasm.floorY + 25, cy + rng.range(-radius, radius) * 0.6));
-      const phi = rng.range(-Math.PI, Math.PI);
+      // the wall facing the chosen spot (a random angle would rarely land near it)
+      const [ax, az] = this.chasm.centreAt(y);
+      const phi = Math.atan2(z - az, x - ax) + rng.range(-0.25, 0.25);
       const R = this.chasm.wallDist(phi, y);
       if (R <= 0) return null;
-      const [ax, az] = this.chasm.centreAt(y);
       const x2 = ax + Math.cos(phi) * (R - 0.25), z2 = az + Math.sin(phi) * (R - 0.25);
       if ((x2 - x) ** 2 + (z2 - z) ** 2 > radius * radius * 4) return null;
       return { x: x2, y, z: z2, mode: 'wall', phi };
@@ -184,6 +190,17 @@ export class Habitats {
         const x2 = ax + Math.cos(phi) * rr, z2 = az + Math.sin(phi) * rr;
         if (this.chasm.clearance(x2, y, z2) > -6) return null;
         return { x: x2, y, z: z2, mode: 'air' };
+      }
+      if (sp.layer === 'layer4') {
+        // the misty air of the cavern, between the floor (or a cup) and the roof
+        const L = this.l4;
+        const dx = x - L.C.x, dz = z - L.C.z;
+        if (Math.hypot(dx, dz) > L.R * 0.85) return null;
+        const f = this.floorNear(x, cy, z, 160, 6);
+        const base = f ? f.y : L.floorC;
+        const y = Math.min(L.ceilC - 25, base + rng.range(6, 40));
+        if (W.isSolid(x, y, z) || W.isSolid(x, y + 3, z) || W.isSolid(x, y - 3, z)) return null;
+        return { x, y, z, mode: 'air' };
       }
       const P = W.field.polar(x, z, this._P);
       if (sp.layer === 'layer2') {

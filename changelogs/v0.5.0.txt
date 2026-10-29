@@ -1,0 +1,143 @@
+DESCENTS — version 0.5.0
+Date: 2026-10-29
+The Fourth Layer: the Goblets of Giants, with its chains of waterfalls and
+an optional mini boss. Creatures rebuilt again as soft, Spore-like bodies
+with faces and personality. Weapons, offensive and defensive abilities and
+many new artifacts. Sound that no longer goes silent, smoother play on slow
+devices, and a Great Fault with many windows and an entrance you can find.
+
+LAYER 4 — THE GOBLETS OF GIANTS (1900-2400 m)
+- Beyond the Fourth Gate the Gate Stair winds down through the rock and opens
+  high in the wall of a vast cavern (about 700 m across and 330 m high).
+- Colossal goblets (about 22 per world) rise from its floor on twisted,
+  root-flared trunks with glowing cyan spots. Each cup holds a shallow lake
+  that spills through a notch in its rim as a waterfall, into a lower cup or
+  down to the mere on the cavern floor (about 22 falls per world, 9 of them
+  into lower lakes). Mist, drizzle and blue haze fill the cavern; roots and
+  vines hang from the ceiling and from under the cups.
+- A chain of seven or eight goblets descends in a spiral from the Gate Stair
+  to the floor, rim linked to rim by walkable root bridges. Side goblets and
+  cascades of small cups step down beside it.
+- Creatures adapted to the goblets: rim grazers, lake hoppers, mist jellies,
+  goblet waders, spray swifts, glass snails, cup crabs, goblet stalkers and
+  vine gliders, glowing like the trunks.
+- THE THRONE CUP: the widest side goblet holds a knee-deep lake where the
+  layer's warden sleeps, an enormous old goblet stalker crowned with glowing
+  crystal. It wakes when you wade into its lake or strike it, and fights with
+  a stomp that sends a wave through the water, volleys of glowing orbs and
+  lunging charges; below half health it is enraged. It has a health bar and
+  its own drums under the music. Fighting it is optional: climb out of its
+  cup and it lets you go, returns to its throne and slowly heals. When it
+  falls, its reward rises from the lake: a Special Grade Gamma Lance.
+- Maps, the vertical map, discoveries, the compass and the HUD know the new
+  layer (goblets, the throne, cascades, the mere and the Gate Stair).
+
+CREATURES — OVERHAUL 2
+- New bodies, built like Spore creatures: a skeleton from the genome, then a
+  skin of soft parts (round cones along the bones, ellipsoids for heads,
+  bellies, cheeks, ears and shells) blended with metaballs into one smooth
+  surface, polygonised in a worker so building a creature costs the main
+  thread almost nothing.
+- Faces with character: big eyes on their own bones with irises, pupils and
+  a catch-light (they follow what the animal looks at, dart about and
+  blink), mouths that open (muzzles, beaks, grins, mandibles, trunks,
+  suckers, tusks), eye stalks, cheeks, ears, horns, crests and hooves, paws,
+  claws, pads or talons.
+- 18 body plans (quadruped, hexapod, strider, biped, hopper, sprawler,
+  serpent, avian, bat, glider, insect, spider, centipede, crab, slug,
+  floater, golem, roller) and 8 families (mammals, reptiles, birds,
+  amphibians, arthropods, molluscs, medusoids, lithoseres); 60 genes now
+  include where the mass sits, how round and young the face looks, mouth
+  width, limb chunkiness, bounce, playfulness, tentacles and shells.
+- Animation with personality: heavy or bouncy steps by temperament; idle
+  moments chosen from playfulness, energy, curiosity and sociability
+  (looking around, happy hops, shaking off, stretching, yawning, sitting,
+  tail wagging, head tilts, sniffing); springy ears, antennae, trunks,
+  crests and tentacles; medusoids pulse, slugs creep, rollers roll.
+- New calls: peeps, burbles, hums and coos for amphibians, molluscs and
+  medusoids.
+
+COMBAT, WEAPONS AND ABILITIES
+- Creatures have health. You can fight with the weapon in hand: the delver's
+  pick everyone carries, or a weapon artifact. Hold attack to keep striking.
+- Weapons: picks, blades and spears (melee), mauls that stun, chain flails
+  that drag creatures in, bolt and shard casters (projectiles) and gamma
+  lances (a continuous ray that heats up). Weapons can carry an element:
+  ember (burns), frost (slows), spark (arcs to a second creature) or venom
+  (poisons). The weapon is held in the left hand opposite the grappling arm.
+- Offensive abilities: Gamma Ray (a searing ray that pierces everything in
+  its path), Shockwave, Thornburst (crystal spikes burst from the ground
+  ahead and pin creatures) and Stasis (freezes the creatures in front of
+  you). Defensive abilities: Aegis (a shield that absorbs damage), Phase
+  Step (an untouchable dash), Mend (health over time) and Repel (creatures
+  around you flee).
+- New passive effects: Bulwark (less damage), Might (more weapon damage),
+  Haste (faster attacks), Leech (heals from damage dealt), Thorns (returns
+  bites), Toughness (more health), Second Wind (more stamina), Calm
+  (creatures are slower to anger) and Darksight (see further in the dark).
+- Struck creatures react by temperament: prey and the timid flee and warn
+  their group; hunters, the bold and parents turn on you for a while. A
+  creature health bar shows the one you struck; hit markers turn red when a
+  blow kills.
+- Controls: left click attacks (right click or G now fires and releases the
+  grappling arm, Q or the wheel reel in), T switches weapon, V picks the next
+  ability. Controller: R2 attacks, R1 fires and releases the arm, R3 picks
+  the next ability. Touch: a new Attack button.
+
+ARTIFACTS
+- Many more shapes (52 kinds): lanterns, eyes, mirrors, plumes, talons,
+  casters, spindles, lances, mauls, flails, shardbows, horns, cages and
+  censers join the earlier ones.
+- A weapon goes to your hand when you pick it up (if only the pick was
+  there); its properties work while it is in hand. The journal has Wield and
+  Put away buttons, describes each weapon and lists the new effects.
+
+SOUND
+- The sound no longer goes silent by itself. A watchdog listens to the
+  output: if it ever carries an invalid value or falls silent while it
+  should not, the mixing graph is rebuilt (and, if that keeps happening, the
+  audio context itself). Every value is checked before it reaches the audio
+  graph, the listener never faces straight up or down, a suspended context
+  is resumed by itself, and one-shot voices are capped (creature chatter
+  first) so swarms and fights cannot overload slow devices.
+- A quiet room tone everywhere and shorter rests between music phrases, so
+  quiet places no longer sound like the sound has died.
+- Combat sounds (swings, hits, shots, the gamma ray, shields, every ability)
+  and the warden's roar, stomp and fall.
+
+PERFORMANCE
+- No frame cap by default anywhere, phones and tablets included (V-Sync and
+  fixed caps remain in Settings).
+- Creature skins are built in a worker; new chunks are uploaded to the GPU
+  within a small budget per frame; bounding volumes come from the workers;
+  shaders are compiled before play begins instead of on first sight; the
+  map's saved data is cached. Layer 4 is meshed apart from the layers above
+  and only drawn near it, so neither half is drawn when it cannot be seen.
+
+LAYER 3 — THE GREAT FAULT
+- Many natural windows: wherever a passage runs close behind the wall, the
+  rock has broken through to the void (about 30-40 windows per world, from
+  the plain down to the Basin), so the descent keeps opening onto the tube.
+- Clear entrances: each sinkhole is now a wide crater with an open cutting
+  leading down to a big dark mouth, flanked by crystal beacons, its standing
+  stones crowned with glowing crystals and crystal lanterns lighting the
+  trail down to the first hall.
+
+SAVES
+- Save format version 4: saves from 0.4.0 and earlier start their seed anew,
+  because the world below the Fourth Gate changed. The weapon in hand, the
+  aegis and the warden's fate are saved.
+
+TESTS
+- New: Layer 4 layout (goblets, lakes, falls, a walkable chain from the Gate
+  Stair to the floor), the warden (it sleeps, wakes, fights, keeps to its
+  cup, lets a fleeing explorer go and can fall), weapons, combat abilities
+  and combat effects. The autopilot walks from the plain through the caves
+  and the Gate Stair, then down the goblet chain to the floor of Layer 4.
+- New browser check (npm run test:audio): the sound comes back by itself
+  after NaN reaches the graph, after the graph goes silent and after the
+  browser suspends the audio context.
+- The controller check now covers R2 attacking and R1 firing the arm; the
+  touch layout checks include the new Attack button.
+- All 60 automated tests pass, as do the browser checks (interface, play
+  scenario, traversal, grappling, mobile, controller and audio).

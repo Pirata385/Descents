@@ -36,13 +36,16 @@ export const M = {
   LICHEN: 31,
   DEEPSTONE: 32,
   NEST: 33,
+  GOBLET: 34,
+  GOBMOSS: 35,
 };
 
 /**
  * Per material properties.
  * color: base sRGB colour (0..1)
  * flag: shader effect (0 none, 1 window glow at night, 2 lava veins (unused), 3 crystal glow, 4 fungus glow,
- *       5 rock strata (assigned by the mesher; limestone beds in the Great Fault))
+ *       5 rock strata (assigned by the mesher; limestone beds in the Great Fault), 6 goblet bark
+ *       (glowing cyan spots and veins))
  * sound: footstep class
  * natural: natural terrain (side faces resolve to dirt/rock strata)
  * food: forage tags for herbivores/lithophages
@@ -92,6 +95,8 @@ def(M.FAULTROCK, 'fault limestone', [0.62, 0.6, 0.56], { sound: 'stone', natural
 def(M.LICHEN, 'cliff moss', [0.42, 0.5, 0.33], { sound: 'grass', natural: true, food: 'graze' });
 def(M.DEEPSTONE, 'abyssal limestone', [0.64, 0.65, 0.63], { sound: 'stone', natural: true, food: 'mineral' });
 def(M.NEST, 'woven nest', [0.46, 0.36, 0.24], { sound: 'wood' });
+def(M.GOBLET, 'goblet bark', [0.24, 0.29, 0.34], { sound: 'wood', flag: 6, climb: 0.8, food: 'mineral' });
+def(M.GOBMOSS, 'goblet moss', [0.2, 0.4, 0.4], { sound: 'grass', natural: true, flag: 4, food: 'graze' });
 
 export const MATERIAL_COUNT = MATERIALS.length;
 

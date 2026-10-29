@@ -3,8 +3,9 @@
 // the same way).
 //
 // In play the sticks move and look, the face buttons jump, crouch, take and
-// observe, the triggers work the grappling arm and the d-pad holds the lamp,
-// the artifact ability and the maps. Outside play the controller drives the
+// observe, R2 attacks, R1 fires and releases the grappling arm, L2/L1 reel
+// in and pay out, R3 picks the next ability and the d-pad holds the lamp, the
+// artifact ability and the maps. Outside play the controller drives the
 // menus and the journal: the d-pad or left stick moves a focus highlight
 // between buttons, ✕ selects, ○ goes back, L1/R1 switch journal tabs and the
 // right stick scrolls (or pans the map).
@@ -30,8 +31,8 @@ export const GLYPH = {
 
 // held buttons → game actions (Input.is / Input.was)
 const HOLD = [
-  [PAD.CROSS, 'jump'], [PAD.CIRCLE, 'crouch'], [PAD.SQUARE, 'interact'], [PAD.TRIANGLE, 'observe'], [PAD.R3, 'observe'],
-  [PAD.L2, 'reelIn'], [PAD.L1, 'reelOut'], [PAD.R1, 'release'], [PAD.UP, 'lamp'], [PAD.DOWN, 'ability'],
+  [PAD.CROSS, 'jump'], [PAD.CIRCLE, 'crouch'], [PAD.SQUARE, 'interact'], [PAD.TRIANGLE, 'observe'], [PAD.R3, 'nextAbility'],
+  [PAD.L2, 'reelIn'], [PAD.L1, 'reelOut'], [PAD.R2, 'attack'], [PAD.UP, 'lamp'], [PAD.DOWN, 'ability'],
 ];
 // pressed buttons → journal tabs
 const TAB_BUTTON = [[PAD.LEFT, 'map'], [PAD.RIGHT, 'abyss'], [PAD.SHARE, 'creatures'], [PAD.TOUCHPAD, 'equipment']];
@@ -187,6 +188,7 @@ export class GamepadInput {
     inp.padDown.clear();
     for (const a of want) inp.padDown.add(a);
     if (E(PAD.R2)) inp.clicked |= 1;
+    if (E(PAD.R1)) inp.clicked |= 4;
     // look: a response curve for fine aim, and the turn speeds up when held fully over
     if (rm > 0) {
       const curve = Math.pow(rm, 1.7) / rm;

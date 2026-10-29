@@ -8,7 +8,7 @@
 // creatures; version 3 (v0.4.0) reshaped the Great Fault into a tube. Older
 // saves cannot be restored: loading one begins the same seed anew (see
 // App.startGame).
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 const INDEX_KEY = 'descents.saves.v1';
 const SLOT_PREFIX = 'descents.save.v1.';
 
@@ -106,6 +106,8 @@ export function captureSave(game, { id, name, auto = false } = {}) {
     discovery: game.discovery.serialize(),
     map: game.mapData.serialize(),
     ecosystem: game.ecosystem.serialize(),
+    combat: game.combat ? game.combat.serialize() : null,
+    warden: { defeated: !!game.wardenDefeated, ...game.ecosystem.warden.serialize() },
     summary: { depth: Math.round(Math.max(0, -p.pos.y)), layer: info.layer, species: game.discovery.species.size, artifacts: game.artifacts.collected.size },
   };
 }
@@ -118,10 +120,13 @@ export function applySave(game, save) {
   game.gameTime = save.gameTime || 0;
   game.timeOfDay = save.timeOfDay ?? 9;
   game.player.restore(save.player);
+  game.wardenDefeated = !!(save.warden && save.warden.defeated);
+  game.ecosystem.warden.restore(save.warden);
   game.discovery.restore(save.discovery);
   game.artifacts.restore(save.artifacts);
   game.mapData.restore(save.map);
   game.ecosystem.restore(save.ecosystem);
+  if (game.combat) game.combat.restore(save.combat);
 }
 
 export function exportSave(save) {

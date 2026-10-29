@@ -33,6 +33,10 @@ function namedPose(g, loc) {
     case 'basin': { const e = plan.fault.exit; const b = plan.fault.basin; return look(e.x, e.y + 1.7, e.z, b.x, b.y + 10, b.z); }
     case 'gate': { const gt = plan.fault.gate.mouth; const b = plan.fault.basin; return look(gt.x + (b.x - gt.x) * 0.15, gt.y + 2.5, gt.z + (b.z - gt.z) * 0.15, gt.x, gt.y + 6, gt.z); }
     case 'up': { const sk = plan.fault.halls[0]; const [cx, cz] = [p.fault.x, p.fault.z]; const y = p.chasm.yWide - 40; return { x: cx + (sk.x - cx) * 0.2, y, z: cz + (sk.z - cz) * 0.2, yaw: 0, pitch: 1.2 }; }
+    case 'l4': { const d = plan.layer4, g0 = d.goblets[d.chain[0]]; const e = d.exit; return look(e.x + e.ux * 6, e.y + 1.7, e.z + e.uz * 6, d.C.x, e.y - 90, d.C.z); }
+    case 'l4over': { const d = plan.layer4; const e = d.exit; return look(d.C.x - e.ux * d.R * 0.55, d.ceilC - 30, d.C.z - e.uz * d.R * 0.55, d.C.x + e.ux * 60, d.ceilC - 210, d.C.z + e.uz * 60); }
+    case 'l4mid': { const d = plan.layer4, g = d.goblets[d.chain[Math.min(d.chain.length - 1, Number(params.get('i') || 3))]]; const n = d.goblets[d.chain[Math.min(d.chain.length - 1, Number(params.get('i') || 3) + 1)]]; return look(g.x + (n.x - g.x) * 0.25, g.yRim + 1.7, g.z + (n.z - g.z) * 0.25, n.x, n.yRim, n.z); }
+    case 'throne': { const d = plan.layer4, g = d.goblets[d.boss.goblet]; return look(g.x + g.Rc * 0.8, g.yRim + 6, g.z, g.x, g.water, g.z); }
     case 'chasm': { const y = Number(params.get('y') || -1300); const [cx, cz] = [p.fault.x, p.fault.z]; return look(cx, y, cz, cx + 100, y - 60, cz); }
     default: return { x: plan.spawn.x, y: plan.spawn.y + 1.7, z: plan.spawn.z, yaw: plan.spawn.yaw, pitch: -0.1 };
   }
@@ -40,7 +44,7 @@ function namedPose(g, loc) {
 
 async function debugStart() {
   const seed = params.get('seed') || '12345';
-  const settings = { viewDistance: Number(params.get('vd') || 1.0), shadows: params.get('shadows') !== '0', pixelRatio: 1 };
+  const settings = { viewDistance: Number(params.get('vd') || 1.0), shadows: params.get('shadows') !== '0', pixelRatio: 1, renderChunks: Number(params.get('rc') || 12) };
   const ui = document.getElementById('ui');
   ui.innerHTML = '<div id="dbg" style="position:fixed;left:8px;top:8px;color:#fff;font:12px monospace;text-shadow:0 0 3px #000;z-index:10"></div>';
   const dbg = document.getElementById('dbg');
@@ -67,6 +71,7 @@ async function debugStart() {
       g.camera.position.set(pose.x, pose.y, pose.z);
       g.camera.rotation.set(pose.pitch, pose.yaw, 0, 'YXZ');
       if (params.get('time')) g.timeOfDay = Number(params.get('time'));
+      g.renderer.snapEnv = true;
       canvas.addEventListener('click', () => g.input.lock());
     },
   });

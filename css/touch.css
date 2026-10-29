@@ -62,7 +62,8 @@ body.touch .seed-input input { -webkit-user-select: text; user-select: text; }
 .t-take { right: calc(150px * var(--t-size)); bottom: calc(118px * var(--t-size)); width: calc(64px * var(--t-size)); height: calc(64px * var(--t-size)); background: rgba(120, 88, 30, 0.75); border-color: var(--gold); animation: takePulse 1.4s ease-in-out infinite; }
 .t-reelin { right: calc(6px * var(--t-size)); bottom: calc(90px * var(--t-size)); width: calc(60px * var(--t-size)); height: calc(60px * var(--t-size)); border-color: var(--gold); }
 .t-reelout { right: calc(16px * var(--t-size)); bottom: calc(158px * var(--t-size)); width: calc(50px * var(--t-size)); height: calc(50px * var(--t-size)); border-color: var(--gold); }
-.t-ability { right: calc(10px * var(--t-size)); bottom: calc(92px * var(--t-size)); width: calc(52px * var(--t-size)); height: calc(52px * var(--t-size)); border-color: #c49aff; }
+.t-attack { right: calc(4px * var(--t-size)); bottom: calc(88px * var(--t-size)); width: calc(64px * var(--t-size)); height: calc(64px * var(--t-size)); border-color: rgba(255, 128, 96, calc(0.85 * var(--t-alpha))); }
+.t-ability { right: calc(16px * var(--t-size)); bottom: calc(160px * var(--t-size)); width: calc(50px * var(--t-size)); height: calc(50px * var(--t-size)); border-color: #c49aff; }
 @keyframes takePulse { 50% { box-shadow: 0 0 18px rgba(217, 178, 106, 0.8); } }
 
 /* ------------------------------------------------------------------ HUD placement with touch controls */
@@ -70,7 +71,12 @@ body.touch .hud .status { left: calc(env(safe-area-inset-left, 0px) + 66px); top
 body.touch .hud .depth-m { font-size: 14px; }
 body.touch .hud .depth-m b { font-size: 17px; }
 body.touch .hud .depth-l { font-size: 11px; }
-body.touch .hud .hb, body.touch .hud .sb { width: 130px; }
+body.touch .hud .hb, body.touch .hud .sb, body.touch .hud .shb { width: 130px; }
+body.touch .hud .weapon { left: 50%; right: auto; bottom: 6px; transform: translateX(-50%); text-align: center; font-size: 11px; }
+body.touch .hud .heat { margin: 3px auto 0; }
+body.touch .hud .target { top: calc(env(safe-area-inset-top, 0px) + 44px); }
+body.touch .hud .boss { bottom: calc(env(safe-area-inset-bottom, 0px) + 30px); width: 40vw; }
+body.touch .hud .bs-name { font-size: 14px; }
 body.touch .hud .clock { left: calc(env(safe-area-inset-left, 0px) + 66px); right: auto; bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 74px); font-size: 12px; }
 body.touch .hud .slots-hud { left: calc(env(safe-area-inset-left, 0px) + 12px); right: auto; bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 64px); flex-direction: column; }
 body.touch .hud .hs { width: 32px; height: 32px; }

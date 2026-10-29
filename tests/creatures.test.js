@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { test, assert, note } from './lib.js';
 import { generateSpecies, individualGenes, inheritGenes, FAMILIES, G, GENES } from '../js/creatures/genome.js';
 import { phenotype, typicalPhenotype } from '../js/creatures/anatomy.js';
-import { buildCreature } from '../js/creatures/bodyMesh.js';
+import { buildCreature } from '../js/creatures/body.js';
 import { Animator } from '../js/creatures/motion.js';
 import { Ecosystem } from '../js/creatures/ecosystem.js';
 import { BAND } from '../js/creatures/habitat.js';
@@ -309,6 +309,42 @@ export async function creatureTests(seeds, plans) {
     assert(air.length >= 2, 'nothing flies in the chasm');
     assert(outside <= Math.max(1, air.length * 0.1), `${outside} fliers flew into the rock`);
     assert(wall.length + home.length >= 1, 'nothing climbs the walls or rests at a roost or nest');
+  });
+
+  await test('Layer 4 warden: sleeps in the Throne Cup, wakes, fights, keeps to its cup and can fall', () => {
+    const plan = plans.get(seeds[0]);
+    const B = plan.layer4 && plan.layer4.boss;
+    assert(B, 'Layer 4 has no Throne Cup');
+    const w = new World(plan);
+    const px = B.x + B.r * 0.35, pz = B.z;
+    const pos = new THREE.Vector3(px, w.floorBelow(px, B.y + 4, pz), pz);
+    assert(B.y - pos.y < 1.05, `the throne lake is too deep to wade (${(B.y - pos.y).toFixed(2)} m)`);
+    const game = fakeGame(plan, pos, 12);
+    const eco = new Ecosystem(game);
+    game.ecosystem = eco;
+    const counts = simulate(game, eco, 1);
+    const W = eco.warden, a = W.agent;
+    assert(a && a.boss, 'the warden did not appear near its cup');
+    simulate(game, eco, 25);
+    Object.assign(counts, simulate(game, eco, 0.1));
+    const hurt = game.player.hurtCount || 0;
+    let maxOut = 0;
+    for (let k = 0; k < 40; k++) { simulate(game, eco, 0.5); maxOut = Math.max(maxOut, Math.hypot(a.pos.x - B.x, a.pos.z - B.z) - B.r); }
+    note(`${W.name}: ${a.sp.name} × ${a.ageScale}, ${a.maxHp} hp · state ${W.state} · explorer hurt ${game.player.hurtCount || 0}× · furthest from the throne ${(maxOut + B.r).toFixed(1)} m of ${B.r.toFixed(1)}`);
+    assert(W.state !== 'dormant', 'the warden slept through an explorer in its lake');
+    assert((game.player.hurtCount || 0) > 0 || hurt > 0, 'the warden never struck the explorer');
+    assert(maxOut <= 0.5, 'the warden left its cup');
+    // the explorer climbs out: it is let go
+    game.player.pos.set(B.x + B.r + 40, B.y + 10, B.z);
+    simulate(game, eco, 20);
+    assert(W.state === 'return' || W.state === 'dormant', `the warden kept fighting an explorer outside its cup (${W.state})`);
+    // and it can fall
+    let slain = 0;
+    eco.on((t) => { if (t === 'boss-slain') slain++; });
+    eco.damage(a, a.hp + 1, { from: 'player' });
+    assert(slain === 1 && game.wardenDefeated, 'the warden did not fall');
+    simulate(game, eco, 5);
+    assert(!eco.agents.some((x) => x.boss && !x.dead), 'a defeated warden came back');
   });
 
   await test('Layer 3 nests: parents drive an explorer away from their eggs', () => {
