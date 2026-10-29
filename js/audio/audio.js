@@ -53,8 +53,8 @@ export class AudioEngine {
     this.wantRunning = true;
     this.voices = [];          // end times of the sounding one-shot voices
     this.lowPri = false;
-    this.watchT = 0;
     this.silentN = 0;
+    this.firstUpdate = 0;
     this.rebuilds = [];
     this.resumeT = 0;
     // browsers only let sound start from a click, tap or key press: any of them
@@ -86,6 +86,8 @@ export class AudioEngine {
     this.pink = this.noiseBuffer('pink');
     this.buildGraph();
     this.ready = true;
+    // the watchdog runs on its own clock, so it works while the game loop is paused or throttled
+    if (!this.watchTimer) this.watchTimer = setInterval(() => { try { this.watchdog(0.5); } catch (err) { console.warn('audio watchdog', err); } }, 500);
   }
 
   /** The mixing graph: buses, compressor and limiter, reverbs, echo, ambience beds. */
@@ -155,13 +157,13 @@ export class AudioEngine {
    * The output went bad (NaN) or silent when it should not be: rebuild the
    * graph; when that keeps happening, start a new audio context.
    */
-  recover(why) {
+  recover(why, poisoned = false) {
     const now = performance.now();
     this.rebuilds = this.rebuilds.filter((t) => now - t < 60000);
     this.rebuilds.push(now);
     console.warn(`audio: ${why}, rebuilding the sound graph`);
     this.teardown();
-    if (this.rebuilds.length > 3 && this.ctx.state !== 'closed') {
+    if (poisoned && this.rebuilds.length > 3 && this.ctx.state !== 'closed') {
       // a fresh context: the browser allows it without a gesture once the page was used
       const old = this.ctx;
       this.ready = false;
@@ -178,7 +180,7 @@ export class AudioEngine {
   /** Twice a second: is the output healthy? */
   watchdog(dt) {
     const ctx = this.ctx;
-    if (!ctx) return;
+    if (!ctx || !this.ready) return;
     // a suspended or interrupted context comes back as soon as the browser lets it
     if (ctx.state !== 'running') {
       this.resumeT -= dt;
@@ -186,9 +188,6 @@ export class AudioEngine {
       this.silentN = 0;
       return;
     }
-    this.watchT -= dt;
-    if (this.watchT > 0) return;
-    this.watchT = 0.5;
     this.probe.getFloatTimeDomainData(this.probeBuf);
     let peak = 0, bad = false;
     for (let i = 0; i < this.probeBuf.length; i++) {
@@ -197,13 +196,15 @@ export class AudioEngine {
       const a = v < 0 ? -v : v;
       if (a > peak) peak = a;
     }
-    if (bad) { this.recover('the output carried NaN'); return; }
-    // the beds always breathe a little; total silence for 4 s means a dead graph
+    if (bad) { this.recover('the output carried NaN', true); return; }
+    // the ambience beds always breathe a little (a room tone at the least); total
+    // silence for 4 s while they are turned up means a dead graph
+    // (only while the game drives the beds: on the title screen they are still closed)
     const s = this.settings;
-    const expect = (s.volMaster ?? 0.8) > 0.05 && Math.max(s.volAmbience ?? 0.7, s.volMusic ?? 0.5, s.volEffects ?? 0.8) > 0.05;
-    if (expect && peak < 1e-7) {
-      if (++this.silentN >= 8) { this.silentN = 0; this.recover('the output fell silent'); }
-    } else this.silentN = 0;
+    const now = performance.now();
+    const expect = now - (this.lastUpdate || 0) < 5000 && now - this.firstUpdate > 6000 && now - (this.silentFix || 0) > 30000 && (s.volMaster ?? 0.8) > 0.05 && (s.volAmbience ?? 0.7) > 0.05;
+    if (peak >= 1e-7) this.silentN = 0;
+    else if (expect && ++this.silentN >= 8) { this.silentN = 0; this.silentFix = now; this.recover('the output fell silent'); }
   }
 
   /** Room for one more one-shot voice? (the least important go first) */
@@ -639,8 +640,8 @@ export class AudioEngine {
    */
   update(dt, e, camera) {
     if (!this.ready) return;
-    this.watchdog(dt);
-    if (!this.ready) return;
+    this.lastUpdate = performance.now();
+    if (!this.firstUpdate) this.firstUpdate = this.lastUpdate;
     // bad input (a NaN from anywhere) must not reach the audio graph
     for (const k of ['enclosed', 'altitude', 'water', 'river', 'fall', 'city', 'chasm', 'beam', 'boss']) if (!fin(e[k])) e[k] = 0;
     if (!fin(e.layer)) e.layer = 0;
@@ -748,7 +749,7 @@ export class AudioEngine {
       for (let i = 0, n = 3 + Math.floor(Math.random() * 4); i < n; i++) this.noise(o, t + i * 0.16, { type: 'lowpass', freq: 600, a: 0.02, d: 0.08, gain: 0.08 });
     }
     if (layer >= 4 && Math.random() < 0.5) {
-      // glassy chimes of the Lantern Sea and the slow lap of dark water
+      // glassy chimes in the goblet cavern and the slow lap of its lakes
       const o = this.out(around(20 + Math.random() * 60, Math.random() * 20), this.amb, 12);
       const f = [987.77, 1174.66, 1318.51, 1567.98, 1975.53][Math.floor(Math.random() * 5)];
       for (const [m, g] of [[1, 0.035], [2.01, 0.012], [3.03, 0.006]]) this.tone(o, t, { freq: f * m, a: 0.004, d: 2.6, gain: g });

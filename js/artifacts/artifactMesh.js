@@ -293,6 +293,7 @@ export function buildArtifactModel(art) {
 let glowTex = null;
 export function glowTexture() {
   if (glowTex) return glowTex;
+  if (typeof document === 'undefined') return null; // headless (tests): a plain sprite
   const c = document.createElement('canvas');
   c.width = c.height = 64;
   const ctx = c.getContext('2d');
