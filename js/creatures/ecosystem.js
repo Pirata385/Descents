@@ -31,6 +31,7 @@ const VIS_R = 150;          // default drawing distance for creatures
 const POOL = 6;             // genomes kept per species and region
 
 const UP = new THREE.Vector3(0, 1, 0);
+const gridKey = (i, j) => (i + 4096) * 8192 + (j + 4096);
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _lv = new THREE.Vector3(), _m = new THREE.Matrix4(), _q = new THREE.Quaternion();
 
 export class Ecosystem {
@@ -117,43 +118,74 @@ export class Ecosystem {
 
   /** Abstract population dynamics for regions away from the explorer. */
   abstractTick(dt) {
+    for (const r of this.regions.values()) this.tickRegion(r, dt);
+  }
+
+  /**
+   * The background population model, a few regions per frame: its cost no longer
+   * grows in bursts with every region the explorer has seen. Regions far away and
+   * long unvisited are forgotten when there are too many (they are surveyed again
+   * if the explorer returns).
+   */
+  abstractStep(dt) {
+    this.tickClock = (this.tickClock || 0) + dt;
+    if (!this.regionList || this.regionList.length !== this.regions.size) { this.regionList = [...this.regions.values()]; this.tickIdx = 0; }
+    const list = this.regionList;
+    const n = Math.min(list.length, 24);
+    for (let k = 0; k < n; k++) {
+      if (this.tickIdx >= list.length) this.tickIdx = 0;
+      const r = list[this.tickIdx++];
+      const last = r.tickAt ?? this.tickClock;
+      r.tickAt = this.tickClock;
+      const el = Math.min(60, this.tickClock - last);
+      if (el > 0) this.tickRegion(r, el);
+    }
+    if (this.regions.size > 900 && this.player) {
+      const p = this.player.pos;
+      const far = [...this.regions.values()].filter((r) => !r.active && Math.hypot(r.x - p.x, r.z - p.z) > 400).sort((a, b) => Math.hypot(b.x - p.x, b.z - p.z) - Math.hypot(a.x - p.x, a.z - p.z));
+      for (const r of far.slice(0, this.regions.size - 700)) this.regions.delete(r.key);
+      this.regionList = null;
+    }
+  }
+
+  tickRegion(r, dt) {
     const sps = this.species;
-    for (const r of this.regions.values()) {
-      if (!r.init || r.active) continue;
-      for (let si = 0; si < sps.length; si++) {
-        const K = r.K[si];
-        if (K <= 0) continue;
-        let p = r.pops[si];
-        const rate = 0.004 / Math.max(0.35, sps[si].size);
-        p += rate * p * (1 - p / K) * dt + (p < 0.05 ? 0.002 * dt * K : 0);
-        const prey = sps[si].relations.prey;
-        if (prey.length) {
-          let food = 0;
-          for (const q of prey) food += r.pops[q];
-          const kill = Math.min(food * 0.4, p * 0.0015 * dt * food / (1 + food));
-          for (const q of prey) if (food > 0) r.pops[q] = Math.max(0, r.pops[q] - kill * (r.pops[q] / food));
-          p += kill * 0.25 - p * 0.0008 * dt * (food < 0.5 ? 1 : 0);
-        }
-        r.pops[si] = clamp(p, 0, K * 1.5);
+    if (!r.init || r.active) return;
+    for (let si = 0; si < sps.length; si++) {
+      const K = r.K[si];
+      if (K <= 0) continue;
+      let p = r.pops[si];
+      const rate = 0.004 / Math.max(0.35, sps[si].size);
+      p += rate * p * (1 - p / K) * dt + (p < 0.05 ? 0.002 * dt * K : 0);
+      const prey = sps[si].relations.prey;
+      if (prey.length) {
+        let food = 0;
+        for (const q of prey) food += r.pops[q];
+        const kill = Math.min(food * 0.4, p * 0.0015 * dt * food / (1 + food));
+        for (const q of prey) if (food > 0) r.pops[q] = Math.max(0, r.pops[q] - kill * (r.pops[q] / food));
+        p += kill * 0.25 - p * 0.0008 * dt * (food < 0.5 ? 1 : 0);
       }
+      r.pops[si] = clamp(p, 0, K * 1.5);
     }
   }
 
   // ------------------------------------------------------------------ queries
   rebuildGrid() {
-    this.grid.clear();
+    // numeric cell keys and reused lists: this runs every frame
+    for (const l of this.grid.values()) l.length = 0;
     for (const a of this.agents) {
       if (a.dead) continue;
-      const k = `${Math.floor(a.pos.x / 16)}:${Math.floor(a.pos.z / 16)}`;
+      const k = gridKey(Math.floor(a.pos.x / 16), Math.floor(a.pos.z / 16));
       let l = this.grid.get(k); if (!l) this.grid.set(k, (l = [])); l.push(a);
     }
+    if (this.grid.size > 400) for (const [k, l] of this.grid) if (!l.length) this.grid.delete(k);
   }
 
   agentsNear(pos, r) {
     const out = [];
     const i0 = Math.floor((pos.x - r) / 16), i1 = Math.floor((pos.x + r) / 16), j0 = Math.floor((pos.z - r) / 16), j1 = Math.floor((pos.z + r) / 16);
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
-      const l = this.grid.get(`${i}:${j}`);
+      const l = this.grid.get(gridKey(i, j));
       if (l) for (const a of l) if (!a.dead && a.pos.distanceToSquared(pos) < r * r) out.push(a);
     }
     return out;
@@ -236,7 +268,7 @@ export class Ecosystem {
   /** Mesh detail (metaball grid cells along the body) from the graphics quality. */
   meshRes() {
     const q = this.game.settings && this.game.settings.quality;
-    return q === 'low' ? 20 : q === 'medium' ? 25 : q === 'ultra' ? 34 : 30;
+    return q === 'low' ? 16 : q === 'medium' ? 22 : q === 'ultra' ? 34 : 28;
   }
 
   /**
@@ -470,8 +502,7 @@ export class Ecosystem {
     this.lampOn = !!(g.lampOn ?? (player.pos.y < -880));
     this.playerSafe = player.mode === 'dead';
     this.playerCalm = !player.vel || player.vel.length() < 1.8;
-    this.tickTimer -= dt;
-    if (this.tickTimer <= 0) { this.tickTimer = 5; this.abstractTick(5); }
+    this.abstractStep(dt);
     this.activationTimer -= dt;
     if (this.activationTimer <= 0) { this.activationTimer = 0.5; this.updateActivation(player.pos); this.warden.update(); }
     // start building bodies: a few at a time in the worker, nearest first

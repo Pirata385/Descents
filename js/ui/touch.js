@@ -196,7 +196,7 @@ export class TouchControls {
   uiAction(ui) {
     const app = this.app;
     if (app.state !== 'playing') return;
-    app.audio.play('click');
+    app.audio.fx('click');
     if (ui === 'pause') app.showPause();
     else if (ui === 'map') app.openJournal('map');
     else if (ui === 'journal') app.openJournal('creatures');

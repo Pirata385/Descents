@@ -14,9 +14,12 @@ import { makeTerrainMaterial, makeFoliageMaterial, makeWaterMaterial, makeFallMa
 
 const LMAX = 5;
 const keyOf = (L, cq, cr) => `${L}:${cq}:${cr}`;
+// once a chunk's buffers are on the GPU, the copies in JavaScript memory are dropped
+// (nothing reads them again: collision uses the span data, culling a precomputed sphere)
+function dropArray() { this.array = null; }
 
 export class ChunkManager {
-  constructor({ world, scene, workers, quality = 1.0, renderChunks = 12, onChunkLoaded }) {
+  constructor({ world, scene, workers, quality = 1.0, renderChunks = 12, onChunkLoaded, lowDetail = false, foliage = 1 }) {
     this.world = world;
     this.scene = scene;
     this.workers = workers; // array of { worker, busy }
@@ -25,18 +28,23 @@ export class ChunkManager {
     this.onChunkLoaded = onChunkLoaded;
     this.nodes = new Map();
     this.pending = new Map(); // key -> {L, cq, cr, prio}
-    this.inFlight = new Map(); // key -> worker index
+    this.inFlight = new Map(); // key -> generation it was requested in
     this.shown = new Set();
     this.desired = [];
     this.group = new THREE.Group();
     this.group.name = 'chunks';
     scene.add(this.group);
     this.terrainMats = [];
-    for (let L = 0; L <= LMAX; L++) this.terrainMats.push(makeTerrainMaterial(1 << L));
+    for (let L = 0; L <= LMAX + 1; L++) this.terrainMats.push(makeTerrainMaterial(1 << L, lowDetail));
     this.foliageMat = makeFoliageMaterial();
     this.waterMat = makeWaterMaterial();
     this.fallMat = makeFallMaterial();
-    this.cacheLimit = 360;
+    // hidden chunks kept for a quick return: few, as each holds GPU memory
+    this.lowDetail = lowDetail;
+    this.foliage = foliage;
+    this.cacheLimit = lowDetail ? 30 : 70;
+    this.generation = 0;
+    this.setRenderDistance(renderChunks);
     this.showUpper = true; this.showDeep = false;
     this.stats = { built: 0, ms: 0, tris: 0, visible: 0, pending: 0 };
     for (let i = 0; i < workers.length; i++) {
@@ -58,6 +66,11 @@ export class ChunkManager {
   select(cx, cz) {
     const out = [];
     const K = this.quality;
+    // nodes are split by the distance of their centre (the old rule, by the distance of
+    // their bounding circle, sent nearly everything near the camera to full detail);
+    // at terrain detail 100% both rules agree
+    const near = (this.lowDetail ? 0.3 : 0.5) + 0.88 * K;
+    const edgeL = this.lowDetail ? 3 : 2;
     const rec = (L, cq, cr) => {
       const [x, z, rad] = this.nodeCenter(L, cq, cr);
       if (Math.hypot(x, z) - rad > this.islandR) return;
@@ -66,9 +79,9 @@ export class ChunkManager {
       const S = CHUNK << L;
       // beyond the render distance: not built, not drawn
       if (d - rad > this.renderRadius) return;
-      // crossing the edge: split until the pieces are small
-      const edge = d + rad > this.renderRadius && L > 2;
-      if (L > 0 && (edge || d - rad < K * S * 0.5)) {
+      // crossing the edge: split until the pieces are small (the fog hides the rest)
+      const edge = d + rad > this.renderRadius && L > edgeL;
+      if (L > 0 && (edge || d < S * near)) {
         for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) rec(L - 1, cq * 2 + i, cr * 2 + j);
       } else out.push({ L, cq, cr, d, S });
     };
@@ -125,7 +138,20 @@ export class ChunkManager {
     // visibility
     for (const k of this.shown) if (!finalSet.has(k)) { const n = this.nodes.get(k); if (n && n.group) n.group.visible = false; }
     let tris = 0;
-    for (const k of finalSet) { const n = this.nodes.get(k); if (n && n.group) { n.group.visible = true; tris += n.tris; } }
+    // each mesh (slab) beyond the fog is skipped: the walls of the Great Fault far above
+    // and below the explorer are hidden in it anyway
+    const cullR = this.renderRadius * 1.1 + 24;
+    for (const k of finalSet) {
+      const n = this.nodes.get(k);
+      if (!n || !n.group) continue;
+      n.group.visible = true;
+      for (const m of n.group.children) {
+        const bs = m.geometry.boundingSphere;
+        const near = !bs || Math.hypot(bs.center.x - camPos.x, bs.center.y - camPos.y, bs.center.z - camPos.z) - bs.radius < cullR;
+        m.visible = near && (m.userData.deep ? this.showDeep : this.showUpper);
+        if (m.visible) tris += m.geometry.index ? m.geometry.index.count / 3 : 0;
+      }
+    }
     this.shown = finalSet;
     this.stats.tris = tris;
     this.stats.visible = finalSet.size;
@@ -157,16 +183,19 @@ export class ChunkManager {
       if (!next) break;
       const [k, req] = next;
       this.pending.delete(k);
-      this.inFlight.set(k, this.workers.indexOf(w));
+      this.inFlight.set(k, this.generation);
       w.busy = true;
-      w.worker.postMessage({ type: 'chunk', key: k, L: req.L, cq: req.cq, cr: req.cr });
+      w.worker.postMessage({ type: 'chunk', key: k, L: req.L, cq: req.cq, cr: req.cr, coarse: this.lowDetail, foliage: this.foliage });
     }
   }
 
   onMessage(wi, msg) {
     if (msg.type === 'chunk') {
       this.workers[wi].busy = false;
+      const gen = this.inFlight.get(msg.key);
       this.inFlight.delete(msg.key);
+      // built before a change of detail: not wanted any more
+      if (gen !== this.generation) { this.dispatch(); return; }
       // collision data is needed at once; the meshes go up to the GPU a few at a time (see pump)
       const o = msg.out;
       if (o.L === 0 && o.spans) { this.world.addChunkData(o.cq, o.cr, o.spans, o.colliders); o.spansDone = true; }
@@ -190,7 +219,17 @@ export class ChunkManager {
     g.setIndex(new THREE.BufferAttribute(m.idx, 1));
     if (m.bs) g.boundingSphere = new THREE.Sphere(new THREE.Vector3(m.bs[0], m.bs[1], m.bs[2]), m.bs[3]);
     else g.computeBoundingSphere();
+    for (const a of Object.values(g.attributes)) a.onUpload(dropArray);
+    g.index.onUpload(dropArray);
     return g;
+  }
+
+  /** Static scene objects: their matrices never change, so three.js need not recompute them each frame. */
+  freeze(o) {
+    o.matrixAutoUpdate = false;
+    o.matrixWorldAutoUpdate = false;
+    o.updateMatrix();
+    o.updateMatrixWorld(true);
   }
 
   buildNode(key, out) {
@@ -204,16 +243,17 @@ export class ChunkManager {
     for (const deep of [false, true]) {
       const sfx = deep ? 'Deep' : '';
       const show = deep ? this.showDeep : this.showUpper;
-      const T = out['terrain' + sfx], F = out['foliage' + sfx], Wt = out['water' + sfx], Fa = out['falls' + sfx];
-      if (T) {
-        const mesh = new THREE.Mesh(this.makeGeometry(T), this.terrainMats[L]);
+      const Wt = out['water' + sfx], Fa = out['falls' + sfx];
+      // terrain and vegetation may come in height slabs (tall chunks)
+      for (const T of [].concat(out['terrain' + sfx] || [])) {
+        const mesh = new THREE.Mesh(this.makeGeometry(T), this.terrainMats[out.mL ?? L]);
         mesh.receiveShadow = L <= 2;
         mesh.castShadow = L <= 1 && !deep;
         mesh.userData.deep = deep; mesh.visible = show;
         group.add(mesh);
         tris += T.idx.length / 3;
       }
-      if (F) {
+      for (const F of [].concat(out['foliage' + sfx] || [])) {
         const mesh = new THREE.Mesh(this.makeGeometry(F, true), this.foliageMat);
         mesh.receiveShadow = L === 0;
         mesh.castShadow = false;
@@ -234,6 +274,7 @@ export class ChunkManager {
         group.add(mesh);
       }
     }
+    group.traverse((o) => this.freeze(o));
     node.group = group;
     node.tris = tris;
     node.ready = true;
@@ -261,7 +302,7 @@ export class ChunkManager {
     }
     while (this.arrived.length && (n === 0 || used < budgetBytes)) {
       const [key, out] = this.arrived.shift();
-      for (const k of ['terrain', 'foliage', 'water', 'falls', 'terrainDeep', 'foliageDeep', 'waterDeep', 'fallsDeep']) if (out[k]) used += out[k].pos.byteLength * 2 + out[k].idx.byteLength;
+      for (const k of ['terrain', 'foliage', 'water', 'falls', 'terrainDeep', 'foliageDeep', 'waterDeep', 'fallsDeep']) if (out[k]) for (const m of [].concat(out[k])) used += m.pos.byteLength * 2 + m.idx.byteLength;
       this.buildNode(key, out);
       n++;
     }
@@ -269,19 +310,45 @@ export class ChunkManager {
   }
 
   nodeDist(out, f) {
-    const m = out.terrain || out.terrainDeep || out.foliage || out.water || out.falls;
+    let m = out.terrain || out.terrainDeep || out.foliage || out.water || out.falls;
+    if (Array.isArray(m)) m = m[0];
     if (!m || !m.bs) return 0;
     return (m.bs[0] - f.x) ** 2 + (m.bs[2] - f.z) ** 2;
   }
 
   evict() {
-    if (this.nodes.size <= this.cacheLimit) return;
-    const list = [...this.nodes.values()].filter((n) => n.ready && !this.shown.has(n.key)).sort((a, b) => a.lastUsed - b.lastUsed);
-    let excess = this.nodes.size - this.cacheLimit;
-    for (const n of list) {
-      if (excess-- <= 0) break;
-      this.disposeNode(n);
+    // hidden chunks beyond the cache allowance go, oldest first; and so do hidden
+    // chunks far outside the render distance, whatever the count
+    const hidden = [...this.nodes.values()].filter((n) => n.ready && !this.shown.has(n.key));
+    if (!hidden.length) return;
+    const f = this.lastFocus;
+    const far = this.renderRadius * 1.5 + 64;
+    let excess = hidden.length - this.cacheLimit;
+    hidden.sort((a, b) => a.lastUsed - b.lastUsed);
+    for (const n of hidden) {
+      let drop = excess > 0;
+      if (!drop && f) { const [x, z, rad] = this.nodeCenter(n.L, n.cq, n.cr); drop = Math.hypot(x - f.x, z - f.z) - rad > far; }
+      if (drop) { this.disposeNode(n); excess--; }
     }
+  }
+
+  /** Rebuild every chunk (after a change of the mesh detail). */
+  reset() {
+    for (const n of [...this.nodes.values()]) if (n.ready) this.disposeNode(n);
+    this.nodes.clear();
+    this.pending.clear();
+    this.shown = new Set();
+    this.arrived = [];
+    this.generation++;
+  }
+
+  /** Coarse meshes and thinner vegetation for the lowest settings (rebuilds the chunks). */
+  setLowDetail(on, foliage) {
+    if (on === this.lowDetail && foliage === this.foliage) return;
+    if (on !== this.lowDetail) for (const m of this.terrainMats) { m.defines = on ? { CHEAP: '' } : {}; m.needsUpdate = true; }
+    this.lowDetail = on; this.foliage = foliage;
+    this.cacheLimit = on ? 30 : 70;
+    this.reset();
   }
 
   disposeNode(n) {

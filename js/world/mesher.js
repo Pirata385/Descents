@@ -4,7 +4,7 @@
 // river waterfall curtains, foliage/decor (vegetation rules per layer and
 // biome, plan decor), and for LOD 0 the column spans used for collision.
 import { ColumnData, BOTTOM, CF, MAX_SPANS } from './column.js';
-import { MeshBuffer, Xform, emitTemplate } from './geomkit.js';
+import { MeshBuffer, Xform, emitTemplate, sliceByHeight } from './geomkit.js';
 import { HEX_W, HEX_R, ROW_H, DIRS, CORNERS, DIR_NORMALS } from '../core/hex.js';
 import { M, MATERIALS, isGrassy } from './materials.js';
 import { hash32 } from '../core/rng.js';
@@ -66,21 +66,32 @@ export class ChunkMesher {
     s.zone = c.zone; s.flags = c.flags; s.biome = c.biome; s.galU = c.galU; s.x = x; s.z = z;
   }
 
-  build(L, cq, cr) {
-    const step = 1 << L;
-    const N = CHUNK, W = this.W;
-    const q0 = cq * N * step, r0 = cr * N * step;
+  /**
+   * Mesh the chunk (L, cq, cr). opts.coarse: for levels above 0, cover the same
+   * ground with half as many cells per side, each twice as large (a quarter of
+   * the triangles; the lowest graphics settings use it). opts.foliage (0..1)
+   * thins the vegetation.
+   */
+  build(L, cq, cr, opts = {}) {
+    const coarse = !!opts.coarse && L >= 1;
+    const mL = coarse ? L + 1 : L;      // the level of detail the cells are meshed at
+    const step = 1 << mL;
+    const N = coarse ? CHUNK >> 1 : CHUNK, W = this.W, NW = N + MARGIN * 2;
+    this.N = N;
+    this.foliageK = opts.foliage ?? 1;
+    const q0 = cq * CHUNK * (1 << L), r0 = cr * CHUNK * (1 << L);
     const gen = this.gen, col = this.col;
     let anyTop = -Infinity, anyBot = Infinity;
-    for (let j = 0; j < W; j++) {
-      for (let i = 0; i < W; i++) {
+    for (let j = 0; j < NW; j++) {
+      for (let i = 0; i < NW; i++) {
         const q = q0 + (i - MARGIN) * step, r = r0 + (j - MARGIN) * step;
         const x = (q + r * 0.5) * HEX_W, z = r * ROW_H;
-        gen.column(x, z, L, col);
-        this.store(j * W + i, col, x, z, L);
+        gen.column(x, z, mL, col);
+        this.store(j * W + i, col, x, z, mL);
         if (col.n) { anyTop = Math.max(anyTop, col.y1[col.n - 1]); anyBot = Math.min(anyBot, col.y0[0]); }
       }
     }
+    L = mL;
     const terrain = new MeshBuffer(16384);
     const water = new MeshBuffer(2048);
     const falls = new MeshBuffer(256);
@@ -91,10 +102,10 @@ export class ChunkMesher {
     if (L <= 1) this.vegetateColumns(L, step, foliage);
     if (L <= 3) this.placeFeatures(L, step, q0, r0, foliage, colliders);
     if (L <= 1) this.placeDecor(L, step, q0, r0, foliage);
-    const out = { L, cq, cr, colliders };
+    const out = { L: coarse ? L - 1 : L, mL, cq, cr, colliders };
     // the deep (Layer 4) part of a chunk becomes meshes of its own, drawn only near it
     let deep = false;
-    for (let i = 0; i < this.cols.length && !deep; i++) { const c = this.cols[i]; if (c.n && c.y1[0] < SPLIT_Y) deep = true; }
+    for (let j = 0; j < NW && !deep; j++) for (let i = 0; i < NW && !deep; i++) { const c = this.cols[j * W + i]; if (c.n && c.y1[0] < SPLIT_Y) deep = true; }
     if (deep) {
       [out.terrain, out.terrainDeep] = terrain.exportSplit(SPLIT_Y);
       [out.water, out.waterDeep] = water.exportSplit(SPLIT_Y);
@@ -103,6 +114,8 @@ export class ChunkMesher {
     } else {
       out.terrain = terrain.export(); out.water = water.export(); out.falls = falls.export(); out.foliage = foliage.export();
     }
+    // tall chunks (walls of the shaft and of the Great Fault) are cut into slabs
+    for (const k of ['terrain', 'terrainDeep', 'foliage', 'foliageDeep']) out[k] = sliceByHeight(out[k], 64);
     if (L === 0) out.spans = this.exportSpans(q0, r0);
     return out;
   }
@@ -174,7 +187,7 @@ export class ChunkMesher {
 
   // ---------------------------------------------------------------- terrain
   meshTerrain(L, step, buf) {
-    const N = CHUNK, W = this.W;
+    const N = this.N, W = this.W;
     const R = HEX_R * step;
     const seed = this.seed;
     const tmp = [0, 0, 0], tmp2 = [0, 0, 0];
@@ -334,7 +347,7 @@ export class ChunkMesher {
 
   // ---------------------------------------------------------------- water
   meshWater(L, step, buf, falls) {
-    const N = CHUNK, W = this.W;
+    const N = this.N, W = this.W;
     for (let j = 0; j < N; j++) {
       for (let i = 0; i < N; i++) {
         const c = this.cols[(j + MARGIN) * W + i + MARGIN];
@@ -395,7 +408,8 @@ export class ChunkMesher {
 
   // ---------------------------------------------------------------- vegetation
   vegetateColumns(L, step, buf) {
-    const N = CHUNK, W = this.W, F = this.flora, seed = this.seed;
+    const N = this.N, W = this.W, F = this.flora, seed = this.seed;
+    const fk = this.foliageK;
     const xf = this._xf;
     const pal = this.pal;
     for (let j = 0; j < N; j++) {
@@ -413,6 +427,8 @@ export class ChunkMesher {
           for (let w = 0; w < c.nw; w++) if (c.wsp[w] === k) wet = true;
           const mat = c.top[k];
           const ex = c.exp[k];
+          // thinner vegetation on the lowest graphics settings
+          if (fk < 1 && h01(seed, qx, qz, k * 7 + 5) > fk) continue;
           const r1 = h01(seed, qx, qz, k * 7 + 1), r2 = h01(seed, qx, qz, k * 7 + 2), r3 = h01(seed, qx, qz, k * 7 + 3);
           const ox = (r2 - 0.5) * 0.7 * step, oz = (r3 - 0.5) * 0.7 * step;
           const yaw = r1 * 6.283;
@@ -550,7 +566,7 @@ export class ChunkMesher {
     const F = this.flora, seed = this.seed, gen = this.gen, col = this.col;
     const xf = this._xf;
     const x0 = (q0 + r0 * 0.5) * HEX_W, z0 = r0 * ROW_H;
-    const span = CHUNK * step;
+    const span = this.N * step;
     // chunk parallelogram corners -> bounding box
     const xs = [x0, x0 + span, x0 + span * 0.5, x0 + span * 1.5];
     const zs = [z0, z0, z0 + span * ROW_H, z0 + span * ROW_H];
@@ -659,7 +675,7 @@ export class ChunkMesher {
     const F = this.flora;
     const xf = this._xf;
     const x0 = (q0 + r0 * 0.5) * HEX_W, z0 = r0 * ROW_H;
-    const span = CHUNK * step;
+    const span = this.N * step;
     const seen = new Set();
     const inChunk = (x, z) => {
       const rf = z / ROW_H, qf = x / HEX_W - rf * 0.5;

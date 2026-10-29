@@ -1,0 +1,81 @@
+DESCENTS — version 0.5.1
+Date: 2026-10-29
+A new sound engine written from scratch, and a heavy optimisation pass for
+slow devices: memory no longer grows as you explore, the lowest settings
+draw a fraction of what they did, and each frame does less work.
+
+SOUND — A NEW ENGINE
+- The old engine is gone. It built a small graph of oscillators, filters and
+  3D panner nodes for every sound, ran two convolution reverbs all the time
+  and leaned on a compressor; on slow devices that load could choke the
+  audio thread, and the sound kept failing.
+- The new engine bakes every sound into samples when the game starts, in a
+  worker (about 120 sounds and every species' call, under a second of
+  work), and plays them back from a pool of at most 24 voices. Nothing is
+  synthesised while you play: no convolution, no 3D panner nodes. Where a
+  sound comes from becomes its volume and stereo balance, computed from the
+  camera; distant sounds pass through one muffling filter; the Great Fault's
+  echo is a single delay line. Ambience beds (wind, gusts, lakes, rivers,
+  falls, cave air, the deep hum, the chasm's howl, rain in the goblet
+  cavern, night insects, the city) fade in and out with the surroundings and
+  are stopped when silent. Music plays baked instrument notes (pads, glass,
+  choir, bells, plucked strings, chimes) in each layer's scale, with the
+  warden's drums during the fight.
+- Sound starts with the first click, tap or key press, and any later one
+  wakes it if the browser put it to sleep (also when the page comes back
+  into view). iPhones and iPads are unlocked with a sound started inside
+  the gesture, and sound plays with their ring/silent switch on (older
+  versions keep a silent media element playing for that). A context whose
+  clock stops is replaced.
+- Settings -> Audio -> Sound check plays a test sound and shows the state of
+  sound (on, waiting for a tap, paused).
+
+PERFORMANCE
+- Memory no longer grows as you explore. Before, up to 360 terrain chunks
+  were kept with a copy of their meshes in memory as well as on the GPU:
+  measured on the lowest settings, memory climbed from about 100 MB to over
+  450 MB after visiting seven places (and several GB in total), which made
+  the game slower the longer it ran. Now a chunk's copy is dropped once it is
+  on the GPU, only a few hidden chunks are kept and far ones are released at
+  once: over the same exploration memory stays between 40 and 130 MB.
+- Far fewer triangles on the lowest settings: chunks split by the distance
+  of their centre (nearly everything near the camera used to go to full
+  detail), chunks beyond the nearest ones are meshed with cells twice as
+  large (a quarter of the triangles), vegetation is thinner. On the Low
+  preset a typical view went from 240,000-525,000 triangles to about
+  90,000-130,000.
+- The Great Fault was the heaviest place: a chunk there holds a kilometre of
+  wall, and all of it was drawn even when only a few metres were in view
+  (200,000-480,000 triangles looking up or down from its caves and windows
+  on the Low preset). Tall chunks are now cut into slabs 64 m high and
+  slabs out of view or beyond the fog are skipped: the same views draw
+  35,000-130,000 triangles, with the same picture (compared pixel by pixel;
+  the open sky far above the Fault now fades into the haze like its far
+  walls, which is what made the two pictures match).
+- Creatures: 20 on the Low preset, with simpler skins (about 2,000 triangles
+  instead of 3,400).
+- The terrain shader skips its per-pixel rock grain, strata wobble and hex
+  outlines on the lowest settings.
+- Less work per frame: terrain chunks no longer have their matrices
+  recomputed every frame; the creature under the crosshair is found a few
+  times a second (every frame only while observing); the compass is rebuilt
+  20 times a second; the creatures' spatial grid uses numbers instead of
+  strings; the background population model runs a few regions per frame
+  instead of all of them every five seconds, and long-unvisited regions are
+  forgotten.
+- Small devices (4 cores or fewer, 4 GB of memory or less, or the Low
+  preset) build chunks with two workers, leaving the cores to the game.
+- Presets are lighter: Low = render distance 5, terrain detail 35%,
+  resolution 0.6, no shadows or antialiasing, 20 creatures; Medium has no
+  shadows. Saved presets (and the old Low values) move to the new ones.
+  Terrain detail now goes down to 25% and creatures to 8.
+
+TESTS
+- npm run test:perf: a long exploration on the Low preset reporting frame
+  cost per system, memory, GPU geometries, chunks and triangles.
+- npm run test:audio (rewritten for the new engine): sound starts with the
+  first click, the sounds are baked (calls included), ambience and
+  footsteps are heard, calls and effects play, a swarm stays within the
+  voice budget, pausing and resuming, a suspended context wakes.
+- Unit test: coarse far chunks cut the triangles to about a quarter and the
+  vegetation thins.

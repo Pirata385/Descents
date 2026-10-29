@@ -18,7 +18,7 @@ export function createInline(post) {
           init(msg.plan);
           post({ type: 'ready' });
         } else if (msg.type === 'chunk') {
-          const out = mesher.build(msg.L, msg.cq, msg.cr);
+          const out = mesher.build(msg.L, msg.cq, msg.cr, { coarse: msg.coarse, foliage: msg.foliage });
           post({ type: 'chunk', key: msg.key, out });
         }
       } catch (err) {

@@ -26,8 +26,9 @@ for (const [name, x, z] of spots) {
     const t0 = performance.now();
     const out = mesher.build(L, cq, cr);
     const dt = performance.now() - t0;
-    const tv = out.terrain ? out.terrain.count : 0, fv = out.foliage ? out.foliage.count : 0, wv = out.water ? out.water.count : 0;
-    const tt = out.terrain ? out.terrain.idx.length / 3 : 0, ft = out.foliage ? out.foliage.idx.length / 3 : 0;
+    const sum = (m, f) => [].concat(m || []).reduce((a, p) => a + f(p), 0);
+    const tv = sum(out.terrain, (p) => p.count), fv = sum(out.foliage, (p) => p.count), wv = sum(out.water, (p) => p.count);
+    const tt = sum(out.terrain, (p) => p.idx.length / 3), ft = sum(out.foliage, (p) => p.idx.length / 3);
     console.log(`${name.padEnd(8)} L${L} ${dt.toFixed(1).padStart(6)}ms terrain v${tv} t${tt} foliage v${fv} t${ft} water v${wv} colliders ${out.colliders.length}`);
   }
 }

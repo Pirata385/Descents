@@ -284,7 +284,7 @@ export class GamepadInput {
       const sc = along + across * 2.2;
       if (sc < bestS) { bestS = sc; best = el; }
     }
-    if (best) { this.setFocus(best); this.app.audio.play?.('tick'); }
+    if (best) { this.setFocus(best); this.app.audio.fx?.('tick'); }
   }
 
   /** Left/right on a slider or list changes its value instead of moving. */
@@ -345,7 +345,7 @@ export class GamepadInput {
         const n = JOURNAL_TABS.length;
         J.show(JOURNAL_TABS[(idx + (E(PAD.R1) ? 1 : -1) + n) % n]);
         this.clearFocus();
-        app.audio.play?.('open');
+        app.audio.fx?.('open');
         return;
       }
       for (const [b, tab] of TAB_BUTTON) {

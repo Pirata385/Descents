@@ -51,8 +51,8 @@ self.onmessage = (e) => {
       self.postMessage({ type: 'ready' });
     } else if (msg.type === 'chunk') {
       const t0 = performance.now();
-      const out = mesher.build(msg.L, msg.cq, msg.cr);
-      for (const k of ['terrain', 'water', 'falls', 'foliage', 'terrainDeep', 'waterDeep', 'fallsDeep', 'foliageDeep']) if (out[k]) bounds(out[k]);
+      const out = mesher.build(msg.L, msg.cq, msg.cr, { coarse: msg.coarse, foliage: msg.foliage });
+      for (const k of ['terrain', 'water', 'falls', 'foliage', 'terrainDeep', 'waterDeep', 'fallsDeep', 'foliageDeep']) if (out[k]) for (const m of [].concat(out[k])) bounds(m);
       out.ms = performance.now() - t0;
       self.postMessage({ type: 'chunk', key: msg.key, out }, transferList(out));
     }
